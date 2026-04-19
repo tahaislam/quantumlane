@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Freshness — QuantumLane</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚊</text></svg>" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <header class="border-b border-slate-200 bg-white">
+    <div class="max-w-5xl mx-auto px-6 py-4 flex justify-between items-center">
+      <a href="/" class="text-lg font-semibold tracking-tight">QuantumLane<span class="text-sky-600">.</span></a>
+      <nav class="flex gap-6 text-sm text-slate-600">
+        <a href="/freshness.html" class="text-slate-900 font-medium">Freshness</a>
+        <a href="/explore.html" class="hover:text-slate-900">Explore</a>
+        <a href="/architecture.html" class="hover:text-slate-900">Architecture</a>
+        <a href="https://github.com/tahaislam" class="hover:text-slate-900">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-6 py-12">
+    <h1 class="text-3xl font-bold mb-2">Pipeline freshness</h1>
+    <p class="text-slate-600 mb-8">
+      Per-feed observability. Polled every 10 seconds.
+      Status is computed from lag against thresholds defined in
+      <code class="text-xs bg-slate-200 px-1 py-0.5 rounded">ingestion/assets/ops.py</code>.
+    </p>
+
+    <div id="freshness-table" class="bg-white rounded-lg border border-slate-200 overflow-hidden">
+      <div class="p-6 text-slate-500">Loading...</div>
+    </div>
+
+    <section class="mt-12 bg-white rounded-lg border border-slate-200 p-6">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-4">How to read this</h2>
+      <dl class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+        <div><dt class="font-medium inline">healthy</dt><dd class="inline text-slate-600"> — lag within expected polling window</dd></div>
+        <div><dt class="font-medium inline">lagging</dt><dd class="inline text-slate-600"> — slow but flowing; investigate if persistent</dd></div>
+        <div><dt class="font-medium inline">stale</dt><dd class="inline text-slate-600"> — significantly behind; likely upstream issue</dd></div>
+        <div><dt class="font-medium inline">down</dt><dd class="inline text-slate-600"> — no recent records; ingestion broken or feed offline</dd></div>
+      </dl>
+      <p class="text-xs text-slate-400 mt-6">
+        If you're seeing all "down" — that's the system being honest. Don't trust dashboards that are always green.
+      </p>
+    </section>
+  </main>
+
+  <footer class="border-t border-slate-200 bg-white mt-16">
+    <div class="max-w-5xl mx-auto px-6 py-6 flex justify-between text-xs text-slate-500">
+      <span>QuantumLane v0.1 · MIT</span>
+      <span>Built by <a href="https://www.linkedin.com/in/taha-islam" class="hover:text-slate-700">Islam Taha</a></span>
+    </div>
+  </footer>
+
+  <script src="/static/app.js"></script>
+  <script>
+    QL.fetchFreshness().then(QL.renderFreshnessTable).catch(QL.renderError);
+    setInterval(() => QL.fetchFreshness().then(QL.renderFreshnessTable).catch(QL.renderError), 10000);
+  </script>
+</body>
+</html>

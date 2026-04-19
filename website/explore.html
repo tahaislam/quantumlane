@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Explore — QuantumLane</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚊</text></svg>" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <header class="border-b border-slate-200 bg-white">
+    <div class="max-w-5xl mx-auto px-6 py-4 flex justify-between items-center">
+      <a href="/" class="text-lg font-semibold tracking-tight">QuantumLane<span class="text-sky-600">.</span></a>
+      <nav class="flex gap-6 text-sm text-slate-600">
+        <a href="/freshness.html" class="hover:text-slate-900">Freshness</a>
+        <a href="/explore.html" class="text-slate-900 font-medium">Explore</a>
+        <a href="/architecture.html" class="hover:text-slate-900">Architecture</a>
+        <a href="https://github.com/tahaislam" class="hover:text-slate-900">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-6 py-12">
+    <h1 class="text-3xl font-bold mb-2">Explore</h1>
+    <p class="text-slate-600 mb-8">
+      Pre-canned queries against the live database. The SQL is shown alongside the result.
+      All queries hit the public API at <code class="text-xs bg-slate-200 px-1 py-0.5 rounded">api.quantumlane.com</code>.
+    </p>
+
+    <article class="bg-white rounded-lg border border-slate-200 p-6 mb-6">
+      <h2 class="font-semibold mb-3">Daily ingestion volume (last 14 days)</h2>
+      <pre class="bg-slate-900 text-slate-100 text-xs p-4 rounded overflow-x-auto mb-4"><code>SELECT received_at::date AS day,
+       'ttc.vehicle_positions' AS feed_key,
+       COUNT(*) AS record_count
+FROM realtime.vehicle_positions
+WHERE received_at &gt;= NOW() - INTERVAL '14 days'
+GROUP BY received_at::date
+ORDER BY day DESC;</code></pre>
+      <div id="daily-stats" class="text-sm text-slate-500">Loading...</div>
+    </article>
+
+    <article class="bg-white rounded-lg border border-slate-200 p-6 mb-6">
+      <h2 class="font-semibold mb-3">Vehicles currently in service</h2>
+      <pre class="bg-slate-900 text-slate-100 text-xs p-4 rounded overflow-x-auto mb-4"><code>SELECT DISTINCT ON (vehicle_id)
+    vehicle_id, route_id, ST_X(location::geometry) AS lon, ST_Y(location::geometry) AS lat
+FROM realtime.vehicle_positions
+WHERE received_at &gt; NOW() - INTERVAL '5 minutes'
+ORDER BY vehicle_id, received_at DESC
+LIMIT 20;</code></pre>
+      <div id="vehicles-latest" class="text-sm text-slate-500">Loading...</div>
+    </article>
+
+    <article class="bg-white rounded-lg border border-slate-200 p-6">
+      <h2 class="font-semibold mb-3">Recent ingestion runs</h2>
+      <pre class="bg-slate-900 text-slate-100 text-xs p-4 rounded overflow-x-auto mb-4"><code>SELECT run_id, asset_key, started_at, status, records_written
+FROM ops.ingestion_runs
+ORDER BY started_at DESC
+LIMIT 20;</code></pre>
+      <div id="recent-runs" class="text-sm text-slate-500">Loading...</div>
+    </article>
+  </main>
+
+  <footer class="border-t border-slate-200 bg-white mt-16">
+    <div class="max-w-5xl mx-auto px-6 py-6 flex justify-between text-xs text-slate-500">
+      <span>QuantumLane v0.1 · MIT</span>
+      <span>Built by <a href="https://www.linkedin.com/in/taha-islam" class="hover:text-slate-700">Islam Taha</a></span>
+    </div>
+  </footer>
+
+  <script src="/static/app.js"></script>
+  <script>
+    QL.fetchJSON('/v1/stats/daily').then(QL.renderDailyStats).catch(QL.renderError);
+    QL.fetchJSON('/v1/vehicle-positions/latest?limit=20').then(QL.renderVehiclesLatest).catch(QL.renderError);
+    QL.fetchJSON('/v1/ops/runs?limit=20').then(QL.renderRecentRuns).catch(QL.renderError);
+  </script>
+</body>
+</html>

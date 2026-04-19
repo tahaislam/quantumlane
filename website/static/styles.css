@@ -1,0 +1,27 @@
+/* Minimal overrides on top of Tailwind CDN.
+   Kept tiny deliberately — Tailwind utilities handle most of the styling. */
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+.prose th, .prose td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+}
+.prose th {
+  background: #f8fafc;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+.prose code {
+  background: #f1f5f9;
+  padding: 0.1em 0.3em;
+  border-radius: 0.2rem;
+  font-size: 0.875em;
+}

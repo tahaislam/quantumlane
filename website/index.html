@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QuantumLane — GTA Transit Data Platform</title>
+  <meta name="description" content="A small, opinionated, production-shaped data platform for GTA transit data. The architecture and observability are the deliverables." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚊</text></svg>" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <header class="border-b border-slate-200 bg-white">
+    <div class="max-w-5xl mx-auto px-6 py-4 flex justify-between items-center">
+      <a href="/" class="text-lg font-semibold tracking-tight">QuantumLane<span class="text-sky-600">.</span></a>
+      <nav class="flex gap-6 text-sm text-slate-600">
+        <a href="/freshness.html" class="hover:text-slate-900">Freshness</a>
+        <a href="/explore.html" class="hover:text-slate-900">Explore</a>
+        <a href="/architecture.html" class="hover:text-slate-900">Architecture</a>
+        <a href="https://github.com/tahaislam" class="hover:text-slate-900">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-6 py-12">
+    <section class="mb-16">
+      <h1 class="text-4xl font-bold tracking-tight mb-4">A working data platform for GTA transit.</h1>
+      <p class="text-lg text-slate-600 max-w-3xl">
+        QuantumLane ingests public transit feeds, persists them with proper schema and quality controls,
+        exposes them via a small read-only API, and surfaces its own operational health. The point isn't
+        the dashboards — it's the engineering. <a href="/architecture.html" class="text-sky-600 hover:underline">Read the architecture →</a>
+      </p>
+    </section>
+
+    <section class="mb-16">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-4">Live status</h2>
+      <div id="freshness-summary" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="bg-white rounded-lg border border-slate-200 p-6">
+          <div class="text-xs font-semibold text-slate-500 uppercase">Loading...</div>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 mt-3">Polled every 15 seconds. <a href="/freshness.html" class="text-sky-600 hover:underline">See full freshness page →</a></p>
+    </section>
+
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-16">
+      <a href="/freshness.html" class="block bg-white rounded-lg border border-slate-200 p-6 hover:border-sky-300 transition">
+        <h3 class="font-semibold mb-2">What's flowing right now</h3>
+        <p class="text-sm text-slate-600">Per-feed freshness, lag, and ingestion rates. Updated continuously from the same telemetry the operator uses.</p>
+      </a>
+      <a href="/explore.html" class="block bg-white rounded-lg border border-slate-200 p-6 hover:border-sky-300 transition">
+        <h3 class="font-semibold mb-2">What you can ask it</h3>
+        <p class="text-sm text-slate-600">Pre-canned queries with the SQL shown alongside. Live data over the public API.</p>
+      </a>
+      <a href="/architecture.html" class="block bg-white rounded-lg border border-slate-200 p-6 hover:border-sky-300 transition">
+        <h3 class="font-semibold mb-2">How it stays healthy</h3>
+        <p class="text-sm text-slate-600">The architecture, the trade-offs, and the decisions that were rejected and why.</p>
+      </a>
+    </section>
+
+    <section class="bg-white rounded-lg border border-slate-200 p-6 mb-16">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-4">For engineers</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <h3 class="font-semibold mb-2">API</h3>
+          <p class="text-sm text-slate-600 mb-3">Public, read-only, rate-limited. No auth required.</p>
+          <a href="/api/docs" class="text-sky-600 hover:underline text-sm">OpenAPI documentation →</a>
+        </div>
+        <div>
+          <h3 class="font-semibold mb-2">Source</h3>
+          <p class="text-sm text-slate-600 mb-3">MIT-licensed. Architecture document and ADRs in the repo.</p>
+          <a href="https://github.com/tahaislam" class="text-sky-600 hover:underline text-sm">github.com/tahaislam →</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="border-t border-slate-200 bg-white">
+    <div class="max-w-5xl mx-auto px-6 py-6 flex justify-between text-xs text-slate-500">
+      <span>QuantumLane v0.1 · MIT</span>
+      <span>Built by <a href="https://www.linkedin.com/in/taha-islam" class="hover:text-slate-700">Islam Taha</a></span>
+    </div>
+  </footer>
+
+  <script src="/static/app.js"></script>
+  <script>
+    // Render the freshness summary at the top of the page.
+    QL.fetchFreshness().then(QL.renderFreshnessSummary).catch(console.error);
+    setInterval(() => QL.fetchFreshness().then(QL.renderFreshnessSummary).catch(console.error), 15000);
+  </script>
+</body>
+</html>

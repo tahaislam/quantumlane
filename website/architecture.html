@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Architecture — QuantumLane</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚊</text></svg>" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <header class="border-b border-slate-200 bg-white">
+    <div class="max-w-5xl mx-auto px-6 py-4 flex justify-between items-center">
+      <a href="/" class="text-lg font-semibold tracking-tight">QuantumLane<span class="text-sky-600">.</span></a>
+      <nav class="flex gap-6 text-sm text-slate-600">
+        <a href="/freshness.html" class="hover:text-slate-900">Freshness</a>
+        <a href="/explore.html" class="hover:text-slate-900">Explore</a>
+        <a href="/architecture.html" class="text-slate-900 font-medium">Architecture</a>
+        <a href="https://github.com/tahaislam" class="hover:text-slate-900">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-6 py-12 prose prose-slate">
+    <h1>Architecture</h1>
+    <p class="text-slate-600">
+      QuantumLane is a single-box data platform that demonstrates production patterns
+      at the smallest scale that still requires real engineering.
+      The full architecture document with ADRs lives in
+      <a href="https://github.com/tahaislam">the repo</a>; what follows is the summary.
+    </p>
+
+    <h2>Principles</h2>
+    <ol>
+      <li><strong>Boring tech that runs forever beats novel tech that runs for a month.</strong></li>
+      <li><strong>Observability is a first-class feature, not an afterthought.</strong></li>
+      <li><strong>Document the trade-off, not the tool.</strong></li>
+      <li><strong>Schema is contract.</strong> Forward-only migrations, never <code>ALTER TABLE</code> in psql.</li>
+      <li><strong>Local dev = production in a smaller box.</strong></li>
+      <li><strong>Cost discipline is part of the design.</strong> Target: under CAD $20/month all-in.</li>
+    </ol>
+
+    <h2>Stack</h2>
+    <table class="text-sm">
+      <thead><tr><th>Layer</th><th>Choice</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Orchestration</td><td>Dagster</td><td>Asset-centric model; lighter than Airflow at single-box scale.</td></tr>
+        <tr><td>Database</td><td>PostgreSQL 16 + PostGIS</td><td>One store at this scale; best-in-class geospatial.</td></tr>
+        <tr><td>Object storage</td><td>Cloudflare R2</td><td>Free egress matters for public dataset publishing.</td></tr>
+        <tr><td>API</td><td>FastAPI + Pydantic v2</td><td>Async, auto OpenAPI, modern validation.</td></tr>
+        <tr><td>Website</td><td>Plain HTML + Tailwind CDN</td><td>4 pages, monthly updates — no build system needed.</td></tr>
+        <tr><td>Reverse proxy</td><td>Caddy</td><td>Automatic TLS, dead-simple config.</td></tr>
+        <tr><td>Host</td><td>Hetzner CAX21 (~CAD $11/mo)</td><td>10x cheaper than AWS for the same patterns.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>What's in v0.1</h2>
+    <ul>
+      <li>TTC GTFS-RT ingestion: vehicle positions (every 30s), trip updates (every 30s), service alerts (every 5m).</li>
+      <li>Static GTFS daily refresh.</li>
+      <li>PostgreSQL 16 + PostGIS, daily-partitioned realtime tables, retention to 30 days.</li>
+      <li>FastAPI public API with rate limiting.</li>
+      <li>Per-feed freshness telemetry surfaced on this site.</li>
+      <li>Schema-drift detection via field-population signatures.</li>
+      <li>Daily parquet exports to R2 (cold storage).</li>
+    </ul>
+
+    <h2>What's deliberately not in v0.1</h2>
+    <ul>
+      <li>Other agencies (GO, MiWay, Brampton) — coming in v0.2 with the schema heterogeneity story.</li>
+      <li>Streaming framework (Kafka, etc.) — overkill at <100 msg/sec.</li>
+      <li>ML / forecasting — needs more historical data first.</li>
+      <li>Authentication — public data, public API.</li>
+      <li>Pretty map UIs — not the point.</li>
+    </ul>
+
+    <h2>Cost</h2>
+    <p>
+      Under CAD $15/month all-in: one Hetzner CAX21 ARM box (~$11),
+      Cloudflare R2 free tier (10 GB), Cloudflare DNS free, GitHub Actions free, domain ~$15/year.
+    </p>
+  </main>
+
+  <footer class="border-t border-slate-200 bg-white mt-16">
+    <div class="max-w-5xl mx-auto px-6 py-6 flex justify-between text-xs text-slate-500">
+      <span>QuantumLane v0.1 · MIT</span>
+      <span>Built by <a href="https://www.linkedin.com/in/taha-islam" class="hover:text-slate-700">Islam Taha</a></span>
+    </div>
+  </footer>
+</body>
+</html>
