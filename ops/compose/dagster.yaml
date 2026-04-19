@@ -1,0 +1,74 @@
+# Dagster instance config.
+# Stored under $DAGSTER_HOME and read by the webserver + daemon.
+# The run store, event log, and schedule storage all live in the dedicated dagster-postgres instance.
+
+run_storage:
+  module: dagster_postgres.run_storage
+  class: PostgresRunStorage
+  config:
+    postgres_db:
+      username:
+        env: DAGSTER_POSTGRES_USER
+      password:
+        env: DAGSTER_POSTGRES_PASSWORD
+      hostname:
+        env: DAGSTER_POSTGRES_HOST
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+      port: 5432
+
+event_log_storage:
+  module: dagster_postgres.event_log
+  class: PostgresEventLogStorage
+  config:
+    postgres_db:
+      username:
+        env: DAGSTER_POSTGRES_USER
+      password:
+        env: DAGSTER_POSTGRES_PASSWORD
+      hostname:
+        env: DAGSTER_POSTGRES_HOST
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+      port: 5432
+
+schedule_storage:
+  module: dagster_postgres.schedule_storage
+  class: PostgresScheduleStorage
+  config:
+    postgres_db:
+      username:
+        env: DAGSTER_POSTGRES_USER
+      password:
+        env: DAGSTER_POSTGRES_PASSWORD
+      hostname:
+        env: DAGSTER_POSTGRES_HOST
+      db_name:
+        env: DAGSTER_POSTGRES_DB
+      port: 5432
+
+# Run coordinator: default queues up to 10 concurrent runs. Plenty for our scale.
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+  config:
+    max_concurrent_runs: 10
+
+# Retention: we keep Dagster's own event history for 30 days. Longer than that,
+# the dagster-postgres volume grows without bound for no operational benefit.
+retention:
+  schedule:
+    purge_after_days: 30
+  sensor:
+    purge_after_days: 30
+
+# Compute logs (stdout/stderr per run). Path must be writable by the non-root user
+# that the dagster-code container runs as.
+compute_logs:
+  module: dagster.core.storage.local_compute_log_manager
+  class: LocalComputeLogManager
+  config:
+    base_dir: /tmp/dagster-compute-logs
+
+telemetry:
+  enabled: false

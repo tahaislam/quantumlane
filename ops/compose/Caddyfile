@@ -1,0 +1,87 @@
+# Caddy config for QuantumLane.
+#
+# Serves:
+#   /                → static website
+#   /static/*        → static assets (JS, CSS)
+#   /v1/*            → FastAPI
+#   /api/docs        → FastAPI OpenAPI docs
+#   /api/*           → FastAPI
+#   /dagster/*       → Dagster UI (optional, can be disabled in prod if you don't want it public)
+#
+# Local dev: use http://localhost:8080 (the :local site below).
+# Prod: replace `quantumlane.com` with your actual domain. Caddy auto-provisions TLS.
+
+# -------------------- local --------------------
+:8080 {
+    # /api/* is stripped and forwarded to FastAPI. So /api/docs -> FastAPI /docs.
+    handle_path /api/* {
+        reverse_proxy api:8000
+    }
+    # Versioned API and health probe keep their original path.
+    handle /v1/* {
+        reverse_proxy api:8000
+    }
+    handle /health {
+        reverse_proxy api:8000
+    }
+    handle {
+        root * /srv/website
+        try_files {path} {path}.html /index.html
+        file_server
+    }
+
+    encode gzip zstd
+    log {
+        output stdout
+        format console
+    }
+}
+
+# Dagster UI on its own port. Dagster's HTML references absolute paths (/assets, /graphql),
+# which makes proxying it under a subpath messy. A dedicated port is the clean answer.
+:3000 {
+    reverse_proxy dagster-webserver:3000
+}
+
+# -------------------- production --------------------
+# Uncomment and update the domain when deploying. Caddy will fetch a Let's Encrypt cert
+# automatically on first request. Make sure DNS is pointed at the box first.
+
+# quantumlane.com, www.quantumlane.com {
+#     redir https://quantumlane.com{uri} permanent
+#
+#     # In prod we don't expose Dagster publicly. Access via SSH tunnel instead:
+#     # ssh -L 3000:localhost:3000 hetzner-box
+#
+#     handle /api/docs* {
+#         reverse_proxy api:8000
+#     }
+#     handle /api/* {
+#         uri strip_prefix /api
+#         reverse_proxy api:8000
+#     }
+#     handle /v1/* {
+#         reverse_proxy api:8000
+#     }
+#     handle /health {
+#         reverse_proxy api:8000
+#     }
+#     handle {
+#         root * /srv/website
+#         try_files {path} {path}.html /index.html
+#         file_server
+#     }
+#
+#     encode gzip zstd
+#     header {
+#         # Security hardening — the basics
+#         Strict-Transport-Security "max-age=31536000; includeSubDomains"
+#         X-Content-Type-Options "nosniff"
+#         X-Frame-Options "DENY"
+#         Referrer-Policy "strict-origin-when-cross-origin"
+#     }
+#     log {
+#         output file /var/log/caddy/access.log
+#         format json
+#     }
+# }

@@ -1,0 +1,8 @@
+# Tells Dagster where to find user code.
+# The dagster-code container exposes a gRPC server; webserver and daemon both connect to it.
+
+load_from:
+  - grpc_server:
+      host: dagster-code
+      port: 4000
+      location_name: quantumlane

@@ -1,0 +1,165 @@
+# QuantumLane stack.
+#
+# Same file runs locally (via `make up`) and on the Hetzner box (via `make deploy`).
+# The only difference is the .env file and, in prod, Caddy issues real TLS certs instead of local ones.
+#
+# Services:
+#   postgres            — PostgreSQL 16 + PostGIS
+#   dagster-postgres    — separate Postgres instance for Dagster's own metadata (run store, event log)
+#                         Why separate: blast radius. A disk full / corruption in app data
+#                         shouldn't take down the orchestrator's metadata store, and vice versa.
+#                         At single-box scale this is two databases on one postgres or two postgres
+#                         containers; we choose two containers so the storage volumes are independent.
+#   dagster-webserver   — Dagster UI (port 3000 internally)
+#   dagster-daemon      — scheduler + sensor daemon
+#   dagster-code        — the user code server (loads our ingestion package)
+#   api                 — FastAPI
+#   caddy               — reverse proxy + automatic TLS, serves website
+
+name: quantumlane
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-quantumlane}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quantumlane}
+      POSTGRES_DB: ${POSTGRES_DB:-quantumlane}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quantumlane}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # No ports exposed in prod. Locally, uncomment to connect via psql:
+    # ports:
+    #   - "5432:5432"
+
+  dagster-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: dagster
+      POSTGRES_PASSWORD: ${DAGSTER_POSTGRES_PASSWORD:-dagster}
+      POSTGRES_DB: dagster
+    volumes:
+      - dagster_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dagster"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  dagster-code:
+    build:
+      context: ../../ingestion
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      QL_POSTGRES_DSN: ${QL_POSTGRES_DSN}
+      QL_TTC_VEHICLE_POSITIONS_URL: ${QL_TTC_VEHICLE_POSITIONS_URL:-https://bustime.ttc.ca/gtfsrt/vehicles}
+      QL_TTC_TRIP_UPDATES_URL: ${QL_TTC_TRIP_UPDATES_URL:-https://bustime.ttc.ca/gtfsrt/trips}
+      QL_TTC_SERVICE_ALERTS_URL: ${QL_TTC_SERVICE_ALERTS_URL:-https://bustime.ttc.ca/gtfsrt/alerts}
+      QL_HTTP_USER_AGENT: ${QL_HTTP_USER_AGENT}
+      QL_R2_ENDPOINT_URL: ${QL_R2_ENDPOINT_URL}
+      QL_R2_ACCESS_KEY_ID: ${QL_R2_ACCESS_KEY_ID}
+      QL_R2_SECRET_ACCESS_KEY: ${QL_R2_SECRET_ACCESS_KEY}
+      QL_R2_BUCKET: ${QL_R2_BUCKET:-quantumlane}
+      QL_ENVIRONMENT: ${QL_ENVIRONMENT:-development}
+      DAGSTER_CURRENT_IMAGE: quantumlane-ingestion:latest
+      DAGSTER_POSTGRES_USER: dagster
+      DAGSTER_POSTGRES_PASSWORD: ${DAGSTER_POSTGRES_PASSWORD:-dagster}
+      DAGSTER_POSTGRES_DB: dagster
+      DAGSTER_POSTGRES_HOST: dagster-postgres
+      DAGSTER_HOME: /home/ql/dagster
+    volumes:
+      - ./dagster.yaml:/home/ql/dagster/dagster.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      dagster api grpc -h 0.0.0.0 -p 4000 -m quantumlane_ingestion.definitions
+
+  dagster-webserver:
+    image: python:3.12-slim
+    restart: unless-stopped
+    environment:
+      DAGSTER_POSTGRES_USER: dagster
+      DAGSTER_POSTGRES_PASSWORD: ${DAGSTER_POSTGRES_PASSWORD:-dagster}
+      DAGSTER_POSTGRES_DB: dagster
+      DAGSTER_POSTGRES_HOST: dagster-postgres
+      DAGSTER_HOME: /opt/dagster/home
+    volumes:
+      - ./dagster.yaml:/opt/dagster/home/dagster.yaml:ro
+      - ./workspace.yaml:/opt/dagster/home/workspace.yaml:ro
+    depends_on:
+      dagster-postgres:
+        condition: service_healthy
+      dagster-code:
+        condition: service_started
+    command: >
+      sh -c "pip install --no-cache-dir 'dagster>=1.9.0' 'dagster-webserver>=1.9.0' 'dagster-postgres>=0.25.0' &&
+             dagster-webserver -h 0.0.0.0 -p 3000 -w /opt/dagster/home/workspace.yaml"
+
+  dagster-daemon:
+    image: python:3.12-slim
+    restart: unless-stopped
+    environment:
+      DAGSTER_POSTGRES_USER: dagster
+      DAGSTER_POSTGRES_PASSWORD: ${DAGSTER_POSTGRES_PASSWORD:-dagster}
+      DAGSTER_POSTGRES_DB: dagster
+      DAGSTER_POSTGRES_HOST: dagster-postgres
+      DAGSTER_HOME: /opt/dagster/home
+    volumes:
+      - ./dagster.yaml:/opt/dagster/home/dagster.yaml:ro
+      - ./workspace.yaml:/opt/dagster/home/workspace.yaml:ro
+    depends_on:
+      dagster-postgres:
+        condition: service_healthy
+      dagster-code:
+        condition: service_started
+    command: >
+      sh -c "pip install --no-cache-dir 'dagster>=1.9.0' 'dagster-postgres>=0.25.0' &&
+             dagster-daemon run -w /opt/dagster/home/workspace.yaml"
+
+  api:
+    build:
+      context: ../../api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      QL_POSTGRES_DSN: ${QL_POSTGRES_DSN}
+      QL_CORS_ORIGINS: ${QL_CORS_ORIGINS:-["http://localhost:8080","https://quantumlane.com"]}
+      QL_ENVIRONMENT: ${QL_ENVIRONMENT:-development}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+      - "3000:3000"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../website:/srv/website:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  dagster_postgres_data:
+  caddy_data:
+  caddy_config:
