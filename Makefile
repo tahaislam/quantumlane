@@ -32,10 +32,14 @@ build: env-check  ## Build all Docker images
 .PHONY: up
 up: env-check  ## Start the full stack
 	$(COMPOSE) up -d
+	@echo "Waiting for Postgres to be ready..."
+	@until $(COMPOSE) exec -T postgres pg_isready -U $${POSTGRES_USER:-quantumlane} > /dev/null 2>&1; do sleep 1; done
+	@echo "Ensuring today's partitions exist..."
+	@$(COMPOSE) exec -T postgres psql -U $${POSTGRES_USER:-quantumlane} -d $${POSTGRES_DB:-quantumlane} -c "CALL ops.ensure_today_partition();"
 	@echo ""
 	@echo "  Website:     http://localhost:8080"
 	@echo "  API docs:    http://localhost:8080/api/docs"
-	@echo "  Dagster UI:  http://localhost:8080/dagster"
+	@echo "  Dagster UI:  http://localhost:3000"
 	@echo ""
 
 .PHONY: down
