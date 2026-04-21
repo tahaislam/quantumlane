@@ -83,46 +83,47 @@ services:
       dagster api grpc -h 0.0.0.0 -p 4000 -m quantumlane_ingestion.definitions
 
   dagster-webserver:
-    image: python:3.12-slim
+    build:
+      context: ../dagster
+      dockerfile: Dockerfile
+    image: quantumlane-dagster:latest
     restart: unless-stopped
     environment:
       DAGSTER_POSTGRES_USER: dagster
       DAGSTER_POSTGRES_PASSWORD: ${DAGSTER_POSTGRES_PASSWORD:-dagster}
       DAGSTER_POSTGRES_DB: dagster
       DAGSTER_POSTGRES_HOST: dagster-postgres
-      DAGSTER_HOME: /opt/dagster/home
+      DAGSTER_HOME: /home/dagster
     volumes:
-      - ./dagster.yaml:/opt/dagster/home/dagster.yaml:ro
-      - ./workspace.yaml:/opt/dagster/home/workspace.yaml:ro
+      - ./dagster.yaml:/home/dagster/dagster.yaml:ro
+      - ./workspace.yaml:/home/dagster/workspace.yaml:ro
     depends_on:
       dagster-postgres:
         condition: service_healthy
       dagster-code:
         condition: service_started
     command: >
-      sh -c "pip install --no-cache-dir 'dagster>=1.9.0' 'dagster-webserver>=1.9.0' 'dagster-postgres>=0.25.0' &&
-             dagster-webserver -h 0.0.0.0 -p 3000 -w /opt/dagster/home/workspace.yaml"
+      dagster-webserver -h 0.0.0.0 -p 3000 -w /home/dagster/workspace.yaml
 
   dagster-daemon:
-    image: python:3.12-slim
+    image: quantumlane-dagster:latest
     restart: unless-stopped
     environment:
       DAGSTER_POSTGRES_USER: dagster
       DAGSTER_POSTGRES_PASSWORD: ${DAGSTER_POSTGRES_PASSWORD:-dagster}
       DAGSTER_POSTGRES_DB: dagster
       DAGSTER_POSTGRES_HOST: dagster-postgres
-      DAGSTER_HOME: /opt/dagster/home
+      DAGSTER_HOME: /home/dagster
     volumes:
-      - ./dagster.yaml:/opt/dagster/home/dagster.yaml:ro
-      - ./workspace.yaml:/opt/dagster/home/workspace.yaml:ro
+      - ./dagster.yaml:/home/dagster/dagster.yaml:ro
+      - ./workspace.yaml:/home/dagster/workspace.yaml:ro
     depends_on:
       dagster-postgres:
         condition: service_healthy
       dagster-code:
         condition: service_started
     command: >
-      sh -c "pip install --no-cache-dir 'dagster>=1.9.0' 'dagster-postgres>=0.25.0' &&
-             dagster-daemon run -w /opt/dagster/home/workspace.yaml"
+      dagster-daemon run -w /home/dagster/workspace.yaml
 
   api:
     build:
