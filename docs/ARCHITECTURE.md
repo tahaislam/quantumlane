@@ -137,6 +137,15 @@ ops.*          — pipeline metadata: freshness, runs, failures, schema versions
 analytics.*    — derived views (empty in v0.1; populated in v0.3)
 ```
 
+**Time zones:**
+All timestamps are stored as `TIMESTAMPTZ` in UTC. Partition boundaries
+are UTC days, so partition names (`_pYYYYMMDD`) reflect UTC dates.
+During evening hours in Toronto, the UTC date may already be the
+following calendar day — this is expected. The `daily_partition_maintenance`
+job runs at 02:00 America/Toronto (06:00-07:00 UTC depending on DST),
+at which point UTC and Toronto dates match and future partitions are
+created for the next 7 UTC days.
+
 **Partitioning strategy:**
 `realtime.vehicle_positions` and `realtime.trip_updates` are range-partitioned by `received_at::date`. Daily partitions. The `daily_partition_maintenance` job creates the next 7 days of partitions each night and detaches partitions older than 30 days. Detached partitions are dropped after their parquet export is verified in R2.
 
