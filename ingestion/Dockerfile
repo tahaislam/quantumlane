@@ -51,6 +51,9 @@ RUN useradd --create-home --shell /bin/bash ql
 USER ql
 WORKDIR /app
 
+RUN mkdir -p /home/ql/dagster
+ENV DAGSTER_HOME=/home/ql/dagster
+
 # Dagster gRPC port
 EXPOSE 4000
 

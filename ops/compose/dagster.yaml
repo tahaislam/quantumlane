@@ -61,14 +61,3 @@ retention:
     purge_after_days: 30
   sensor:
     purge_after_days: 30
-
-# Compute logs (stdout/stderr per run). Path must be writable by the non-root user
-# that the dagster-code container runs as.
-compute_logs:
-  module: dagster.core.storage.local_compute_log_manager
-  class: LocalComputeLogManager
-  config:
-    base_dir: /tmp/dagster-compute-logs
-
-telemetry:
-  enabled: false
