@@ -52,7 +52,7 @@ app = FastAPI(
     description=(
         "Public read-only API for GTA transit data. "
         "Rate-limited to 60 req/min/IP. No auth required. "
-        "See https://quantumlane.com for the project."
+        "See https://quantumlane.io for the project."
     ),
     version="0.1.0",
     lifespan=lifespan,

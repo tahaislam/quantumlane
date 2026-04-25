@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     # --- HTTP ---
     http_timeout_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
     http_user_agent: str = Field(
-        default="QuantumLane/0.1 (https://quantumlane.com; contact@quantumlane.com)",
+        default="QuantumLane/0.1 (https://quantumlane.io; contact@quantumlane.io)",
         description="UA string sent with every outbound request. Be a polite citizen.",
     )
 

@@ -114,7 +114,7 @@ fmt:  ## Auto-format
 
 .PHONY: deploy
 deploy: env-check  ## Deploy to the Hetzner box. Requires $DEPLOY_HOST in env.
-	@test -n "$$DEPLOY_HOST" || (echo "ERROR: set DEPLOY_HOST (e.g. ql@quantumlane.com)" && exit 1)
+	@test -n "$$DEPLOY_HOST" || (echo "ERROR: set DEPLOY_HOST (e.g. ql@quantumlane.io)" && exit 1)
 	@bash ops/scripts/deploy.sh "$$DEPLOY_HOST"
 
 .PHONY: backup

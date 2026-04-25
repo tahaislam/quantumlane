@@ -8,7 +8,7 @@
 #   - A user with docker group membership (used as the deploy target)
 #
 # Usage:
-#   DEPLOY_HOST=ql@quantumlane.com make deploy
+#   DEPLOY_HOST=ql@quantumlane.io make deploy
 #
 # What it does:
 #   1. Rsync the repo to the host (excluding .env, secrets, caches)
