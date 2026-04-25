@@ -9,7 +9,7 @@
 #   /dagster/*       → Dagster UI (optional, can be disabled in prod if you don't want it public)
 #
 # Local dev: use http://localhost:8080 (the :local site below).
-# Prod: replace `quantumlane.com` with your actual domain. Caddy auto-provisions TLS.
+# Prod: replace `quantumlane.io` with your actual domain. Caddy auto-provisions TLS.
 
 # -------------------- local --------------------
 :8080 {
@@ -47,8 +47,8 @@
 # Uncomment and update the domain when deploying. Caddy will fetch a Let's Encrypt cert
 # automatically on first request. Make sure DNS is pointed at the box first.
 
-# quantumlane.com, www.quantumlane.com {
-#     redir https://quantumlane.com{uri} permanent
+# quantumlane.io, www.quantumlane.io {
+#     redir https://quantumlane.io{uri} permanent
 #
 #     # In prod we don't expose Dagster publicly. Access via SSH tunnel instead:
 #     # ssh -L 3000:localhost:3000 hetzner-box

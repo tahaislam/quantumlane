@@ -132,7 +132,7 @@ services:
     restart: unless-stopped
     environment:
       QL_POSTGRES_DSN: ${QL_POSTGRES_DSN}
-      QL_CORS_ORIGINS: ${QL_CORS_ORIGINS:-["http://localhost:8080","https://quantumlane.com"]}
+      QL_CORS_ORIGINS: ${QL_CORS_ORIGINS:-["http://localhost:8080","https://quantumlane.io"]}
       QL_ENVIRONMENT: ${QL_ENVIRONMENT:-development}
     depends_on:
       postgres:

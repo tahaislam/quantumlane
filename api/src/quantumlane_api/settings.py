@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     postgres_pool_size: int = Field(default=5, ge=1, le=20)
 
     cors_origins: list[str] = Field(
-        default=["http://localhost:8080", "https://quantumlane.com"],
+        default=["http://localhost:8080", "https://quantumlane.io"],
         description="Allowed CORS origins for the website to call the API.",
     )
 
