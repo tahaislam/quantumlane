@@ -61,3 +61,15 @@ retention:
     purge_after_days: 30
   sensor:
     purge_after_days: 30
+
+# Compute log capture: writes per-step stdout/stderr to disk for the UI.
+# Pinned to /tmp explicitly because the three Dagster containers run as
+# different users (dagster vs ql) with different DAGSTER_HOME values, and
+# Dagster's default path resolution can land on a directory that isn't
+# writable by the executing user. /tmp is writable by all users and the
+# logs are appropriately ephemeral.
+compute_logs:
+  module: dagster.core.storage.local_compute_log_manager
+  class: LocalComputeLogManager
+  config:
+    base_dir: /tmp/dagster-compute-logs
