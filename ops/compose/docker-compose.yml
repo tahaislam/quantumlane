@@ -20,7 +20,7 @@ name: quantumlane
 
 services:
   postgres:
-    image: postgis/postgis:16-3.4
+    image: imresamu/postgis:16-3.4
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-quantumlane}
