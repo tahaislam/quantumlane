@@ -143,8 +143,8 @@ def daily_partition_maintenance(
                     if _ensure_partition(cur, parent, name, day):
                         created.append(name)
 
-            # Detach partitions whose data is > 30 days old
-            cutoff = today - timedelta(days=30)
+            # Detach partitions whose data is > 3 days old
+            cutoff = today - timedelta(days=3)
             for parent in ("realtime.vehicle_positions", "realtime.trip_updates"):
                 detached.extend(_detach_old_partitions(cur, parent, cutoff))
 

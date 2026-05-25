@@ -112,7 +112,7 @@ See [ADR-001](adr/001-dagster-over-airflow.md) for the orchestrator choice.
 | `ttc_static_gtfs` | TTC static GTFS zip | Daily 04:00 ET | `static_gtfs.*` (full reload) |
 | `freshness_check` | Database query | Every minute | `ops.freshness_snapshot` |
 | `daily_parquet_export` | Database query | Daily 03:00 ET | R2 `parquet/dt=YYYY-MM-DD/*.parquet` |
-| `daily_partition_maintenance` | — | Daily 02:00 ET | Create next 7 days, detach >30 days |
+| `daily_partition_maintenance` | — | Daily 02:00 ET | Create next 7 days, detach >3 days |
 
 **Resources** (Dagster `ConfigurableResource`):
 - `PostgresResource`: connection pool, exposes engine and helpers
@@ -147,10 +147,10 @@ at which point UTC and Toronto dates match and future partitions are
 created for the next 7 UTC days.
 
 **Partitioning strategy:**
-`realtime.vehicle_positions` and `realtime.trip_updates` are range-partitioned by `received_at::date`. Daily partitions. The `daily_partition_maintenance` job creates the next 7 days of partitions each night and detaches partitions older than 30 days. Detached partitions are dropped after their parquet export is verified in R2.
+`realtime.vehicle_positions` and `realtime.trip_updates` are range-partitioned by `received_at::date`. Daily partitions. The `daily_partition_maintenance` job creates the next 7 days of partitions each night and detaches partitions older than 3 days. Detached partitions are dropped after their parquet export is verified in R2.
 
 **Retention:**
-- Hot in Postgres: 30 days
+- Hot in Postgres: 3 days
 - Cold in R2 as parquet: indefinite (cheap)
 - Raw protobuf snapshots in R2: 7 days (debugging and replay only)
 
@@ -172,7 +172,7 @@ GET  /v1/freshness                  — per-feed freshness summary
 GET  /v1/vehicle-positions/latest   — most recent position per vehicle
 GET  /v1/routes                     — list routes from static GTFS
 GET  /v1/routes/{route_id}/vehicles — current vehicles on a route
-GET  /v1/stats/daily                — record counts per feed per day, last 14 days
+GET  /v1/stats/daily                — record counts per feed per day, last 3 days
 GET  /v1/ops/runs                   — recent Dagster run summary (last 50)
 ```
 
