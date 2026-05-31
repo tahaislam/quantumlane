@@ -127,8 +127,13 @@ def daily_partition_maintenance(
     Range partitioning requires the partitions to exist before data lands in them.
     We create 7 days ahead so a missed run doesn't break ingestion the next day.
 
-    Detach (not drop) old partitions: the parquet export job is expected to have
-    archived them to R2 first. Dropping happens in a separate job after R2 verification.
+    Retention: partitions older than 3 days are dropped (detached if attached,
+    then dropped; orphaned tables from prior detach-without-drop behavior are
+    swept up by name pattern). When the Iceberg cold tier (V0.3.3) lands, the
+    archival write becomes an upstream step in the Dagster graph: the partition
+    is archived to Iceberg, the archive is verified, and only then is it dropped.
+    Until then, retention is hot-only with no archival — disposable by design
+    per the V0.3.0 reset.
     """
     today = date.today()
     created = []
@@ -143,19 +148,18 @@ def daily_partition_maintenance(
                     if _ensure_partition(cur, parent, name, day):
                         created.append(name)
 
-            # Detach partitions whose data is > 3 days old
+            # Drop partitions whose data is > 3 days old (was: detach-only, which leaked orphans)
             cutoff = today - timedelta(days=3)
+            dropped = []
             for parent in ("realtime.vehicle_positions", "realtime.trip_updates"):
-                detached.extend(_detach_old_partitions(cur, parent, cutoff))
-
+                dropped.extend(_drop_old_partitions(cur, parent, cutoff))
         conn.commit()
-
     context.add_output_metadata(
         {
             "partitions_created": MetadataValue.int(len(created)),
-            "partitions_detached": MetadataValue.int(len(detached)),
+            "partitions_dropped": MetadataValue.int(len(dropped)),
             "created_names": MetadataValue.text(", ".join(created) if created else "none"),
-            "detached_names": MetadataValue.text(", ".join(detached) if detached else "none"),
+            "dropped_names": MetadataValue.text(", ".join(dropped) if dropped else "none"),
         }
     )
 
@@ -193,9 +197,18 @@ def _ensure_partition(cur, parent: str, name: str, day: date) -> bool:
     return True
 
 
-def _detach_old_partitions(cur, parent: str, cutoff: date) -> list[str]:
-    """Detach partitions whose date is strictly before cutoff. Returns names detached."""
+def _drop_old_partitions(cur, parent: str, cutoff: date) -> list[str]:
+    """
+    Drop partitions whose date is strictly before cutoff. Returns names dropped.
+
+    Finds partition-shaped tables by name pattern ({base}_pYYYYMMDD) via pg_class,
+    NOT via pg_inherits — so this also reclaims previously-detached orphan tables
+    left behind by the earlier detach-without-drop behavior. Attached partitions
+    are detached first, then dropped; already-detached orphans are dropped directly.
+    """
     schema, base = parent.split(".")
+
+    # Names currently attached to this parent (so we know which need detaching first).
     cur.execute(
         """
         SELECT child.relname
@@ -207,18 +220,34 @@ def _detach_old_partitions(cur, parent: str, cutoff: date) -> list[str]:
         """,
         (schema, base),
     )
-    detached = []
+    attached = {row[0] for row in cur.fetchall()}
+
+    # All partition-shaped tables for this parent, attached OR orphaned.
+    cur.execute(
+        """
+        SELECT c.relname
+        FROM pg_class c
+        JOIN pg_namespace ns ON c.relnamespace = ns.oid
+        WHERE ns.nspname = %s
+          AND c.relkind IN ('r', 'p')
+          AND c.relname ~ %s
+        """,
+        (schema, f"^{base}_p[0-9]{{8}}$"),
+    )
+
+    dropped = []
     for (child_name,) in cur.fetchall():
-        # Parse date from suffix "_pYYYYMMDD"
+        suffix = child_name.rsplit("_p", 1)[1]
         try:
-            suffix = child_name.rsplit("_p", 1)[1]
             child_date = date(int(suffix[0:4]), int(suffix[4:6]), int(suffix[6:8]))
         except (ValueError, IndexError):
             continue
         if child_date < cutoff:
-            cur.execute(f"ALTER TABLE {parent} DETACH PARTITION {schema}.{child_name}")
-            detached.append(child_name)
-    return detached
+            if child_name in attached:
+                cur.execute(f"ALTER TABLE {parent} DETACH PARTITION {schema}.{child_name}")
+            cur.execute(f"DROP TABLE IF EXISTS {schema}.{child_name}")
+            dropped.append(child_name)
+    return dropped
 
 
 @asset(
