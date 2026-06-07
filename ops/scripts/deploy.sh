@@ -29,7 +29,7 @@ if [[ -z "$HOST" ]]; then
     exit 2
 fi
 
-REMOTE_DIR="${REMOTE_DIR:-/opt/quantumlane}"
+REMOTE_DIR="${REMOTE_DIR:-/home/ql/projects/quantumlane}"
 LOCAL_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PROD_ENV_FILE="${LOCAL_ROOT}/secrets/prod.env"
 
