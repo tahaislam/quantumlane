@@ -29,12 +29,12 @@
     </p>
 
     <article class="bg-white rounded-lg border border-slate-200 p-6 mb-6">
-      <h2 class="font-semibold mb-3">Daily ingestion volume (last 14 days)</h2>
+      <h2 class="font-semibold mb-3">Daily ingestion volume (last 4 days)</h2>
       <pre class="bg-slate-900 text-slate-100 text-xs p-4 rounded overflow-x-auto mb-4"><code>SELECT received_at::date AS day,
        'ttc.vehicle_positions' AS feed_key,
        COUNT(*) AS record_count
 FROM realtime.vehicle_positions
-WHERE received_at &gt;= NOW() - INTERVAL '14 days'
+WHERE received_at &gt;= NOW() - INTERVAL '4 days'
 GROUP BY received_at::date
 ORDER BY day DESC;</code></pre>
       <div id="daily-stats" class="text-sm text-slate-500">Loading...</div>
