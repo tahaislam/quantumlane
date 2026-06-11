@@ -78,7 +78,7 @@ def _meta(data_age_seconds: int | None = None) -> Meta:
 # Health / readiness — no rate limit, no envelope
 # -----------------------------------------------------------------------------
 
-@app.get("/health", tags=["ops"], summary="Liveness probe")
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["ops"], summary="Liveness probe")
 def health() -> dict:
     return {"status": "ok"}
 
