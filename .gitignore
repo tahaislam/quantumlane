@@ -2,6 +2,7 @@
 .env
 .env.local
 .env.*.local
+.venv-spark/
 secrets/
 
 # Private notes — personal context, not for the public repo
@@ -60,3 +61,6 @@ logs/
 
 # Parquet temp files
 *.parquet.tmp
+
+# Spark jars (downloads or if we ever add custom ones)
+spark/jars/
