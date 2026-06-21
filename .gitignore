@@ -3,6 +3,7 @@
 .env.local
 .env.*.local
 .venv-spark/
+.venv-archive/
 secrets/
 
 # Private notes — personal context, not for the public repo

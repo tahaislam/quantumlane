@@ -6,12 +6,16 @@ the ingestion assets and write to the ops.* schema.
 """
 from __future__ import annotations
 
+import os
+import tempfile
 from datetime import UTC, date, datetime, timedelta
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import structlog
 from dagster import MetadataValue, asset
 
-from quantumlane_ingestion.resources import PostgresResource, R2Resource
+from quantumlane_ingestion.resources import PostgresResource, S3Resource
 
 # NOTE: Asset `context` parameters are deliberately unannotated. See assets/ttc.py for rationale.
 
@@ -25,6 +29,14 @@ FRESHNESS_THRESHOLDS = {
     "ttc.trip_updates":      (60, 180, 600),
     "ttc.service_alerts":    (600, 1800, 3600),  # alerts can legitimately go an hour without changes
 }
+
+# Cold-tier export config: which realtime tables get archived, and the timestamp
+# column each is range-partitioned / ordered on.
+EXPORT_FEEDS = {
+    "trip_updates": "received_at",
+    "vehicle_positions": "received_at",
+}
+EXPORT_CHUNK_ROWS = 200_000
 
 
 @asset(
@@ -255,18 +267,124 @@ def _drop_old_partitions(cur, parent: str, cutoff: date) -> list[str]:
     group_name="ops",
     compute_kind="python",
     description=(
-        "Exports yesterday's realtime data to R2 as parquet. Stub in v0.1 — "
-        "wiring up the export query → pyarrow → R2 upload is straightforward; tracked in v0.1.2."
+        "Exports the prior day's realtime feeds to the S3 cold tier as Parquet. "
+        "Archives yesterday (not the partition about to drop) so there's a ~2-day "
+        "buffer to catch a failed export before retention removes the source."
     ),
 )
 def daily_parquet_export(
     context,
     postgres: PostgresResource,
-    r2: R2Resource,
+    s3: S3Resource,
 ) -> None:
-    if not r2.is_configured():
-        context.log.warning("R2 not configured; skipping export.")
-        context.add_output_metadata({"status": "skipped_no_r2"})
+    """
+    Cold-tier archival: one Parquet file per feed per day, written to S3 under a
+    Hive-style key (feed/dt=YYYY-MM-DD/part-0.parquet) so downstream Spark/Iceberg
+    can prune by partition.
+
+    Memory-safe by construction (the prod box is small and a day is millions of
+    rows): a named (server-side) cursor streams the day in chunks, and a held-open
+    ParquetWriter appends each chunk as a row group to a single local file before
+    upload — so the full day never materializes in RAM, and we avoid the
+    small-files problem.
+
+    Idempotent: the key is deterministic per (feed, day); a re-run overwrites that
+    day rather than duplicating it.
+
+    Supersedes the v0.1 R2 stub. When the Iceberg cold tier (V0.3.3) lands, this
+    becomes the archive step that runs upstream of the retention drop in
+    daily_partition_maintenance (archive -> verify -> drop).
+    """
+    if not s3.is_configured():
+        context.log.warning("S3 not configured; skipping export.")
+        context.add_output_metadata({"status": MetadataValue.text("skipped_no_s3")})
         return
-    context.log.info("daily_parquet_export — implementation pending in v0.1.2.")
-    context.add_output_metadata({"status": "stub"})
+
+    # Yesterday, UTC. Half-open [day_start, day_end) so consecutive days never overlap.
+    target_day = (datetime.now(UTC) - timedelta(days=1)).date()
+    day_start = datetime.combine(target_day, datetime.min.time(), tzinfo=UTC)
+    day_end = day_start + timedelta(days=1)
+
+    client = s3.client()
+    bucket = s3.bucket
+
+    context.log.info(f"cold-tier export for {target_day} ({day_start} .. {day_end})")
+
+    per_feed: dict[str, dict] = {}
+
+    with postgres.connection() as conn:
+        for table, ts_col in EXPORT_FEEDS.items():
+            query = (
+                f"SELECT * FROM realtime.{table} "
+                f"WHERE {ts_col} >= %s AND {ts_col} < %s "
+                f"ORDER BY {ts_col}"
+            )
+
+            with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp:
+                local_path = tmp.name
+
+            writer = None
+            total_rows = 0
+            try:
+                # Named cursor => server-side streaming; itersize bounds the fetch batch.
+                with conn.cursor(name=f"export_{table}_{target_day:%Y%m%d}") as cur:
+                    cur.itersize = EXPORT_CHUNK_ROWS
+                    cur.execute(query, (day_start, day_end))
+                    cols = [d.name for d in cur.description]
+
+                    batch: list[tuple] = []
+                    for row in cur:
+                        batch.append(row)
+                        if len(batch) >= EXPORT_CHUNK_ROWS:
+                            writer, n = _write_batch(writer, local_path, cols, batch)
+                            total_rows += n
+                            batch = []
+                    if batch:
+                        writer, n = _write_batch(writer, local_path, cols, batch)
+                        total_rows += n
+
+                if writer is None:
+                    context.log.warning(f"{table}: 0 rows for {target_day} — skipping")
+                    per_feed[table] = {"rows": 0, "bytes": 0}
+                    continue
+                writer.close()
+                writer = None
+
+                key = f"{table}/dt={target_day.isoformat()}/part-0.parquet"
+                client.upload_file(local_path, bucket, key)
+                size = os.path.getsize(local_path)
+
+                context.log.info(
+                    f"{table}: {total_rows:,} rows -> s3://{bucket}/{key} "
+                    f"({size / 1e6:.2f} MB, zstd)"
+                )
+                per_feed[table] = {"rows": total_rows, "bytes": size}
+            finally:
+                if writer is not None:
+                    writer.close()
+                if os.path.exists(local_path):
+                    os.remove(local_path)
+
+    context.add_output_metadata(
+        {
+            "status": MetadataValue.text("ok"),
+            "target_day": MetadataValue.text(str(target_day)),
+            "trip_updates_rows": MetadataValue.int(per_feed.get("trip_updates", {}).get("rows", 0)),
+            "vehicle_positions_rows": MetadataValue.int(
+                per_feed.get("vehicle_positions", {}).get("rows", 0)
+            ),
+            "total_bytes": MetadataValue.int(sum(f["bytes"] for f in per_feed.values())),
+        }
+    )
+
+
+def _write_batch(writer, local_path: str, cols: list[str], batch: list[tuple]):
+    """Append a batch of rows to the open ParquetWriter, opening it on first use.
+
+    Returns (writer, rows_written). The first batch defines the schema.
+    """
+    arrow_batch = pa.Table.from_pylist([dict(zip(cols, r, strict=True)) for r in batch])
+    if writer is None:
+        writer = pq.ParquetWriter(local_path, arrow_batch.schema, compression="zstd")
+    writer.write_table(arrow_batch)
+    return writer, len(batch)

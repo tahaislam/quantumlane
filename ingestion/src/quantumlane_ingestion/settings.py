@@ -57,11 +57,29 @@ class Settings(BaseSettings):
         description="UA string sent with every outbound request. Be a polite citizen.",
     )
 
-    # --- R2 / object storage ---
-    r2_endpoint_url: str | None = Field(default=None, description="Cloudflare R2 endpoint URL.")
-    r2_access_key_id: str | None = Field(default=None)
-    r2_secret_access_key: str | None = Field(default=None)
-    r2_bucket: str = Field(default="quantumlane")
+    # --- S3 / object storage (cold tier) ---
+    # AWS S3 replaced Cloudflare R2 in the v0.3 lakehouse arc (S3-native EMR/Iceberg).
+    # Credentials are the quantumlane-spark IAM user's keys; bucket is the cold-tier bucket.
+    # NOTE: env_prefix is "QL_", so these read QL_S3_ACCESS_KEY_ID, QL_S3_SECRET_ACCESS_KEY,
+    # QL_S3_BUCKET, QL_S3_REGION. If your .env currently uses QL_AWS_ACCESS_KEY_ID /
+    # QL_AWS_SECRET_ACCESS_KEY (from the V0.3.0 setup), either rename them to the QL_S3_*
+    # form or add validation_alias entries — see the comment on each field below.
+    s3_access_key_id: str | None = Field(
+        default=None,
+        description="AWS access key id for the cold-tier bucket (QL_S3_ACCESS_KEY_ID).",
+    )
+    s3_secret_access_key: str | None = Field(
+        default=None,
+        description="AWS secret access key for the cold-tier bucket (QL_S3_SECRET_ACCESS_KEY).",
+    )
+    s3_bucket: str = Field(
+        default="",
+        description="Cold-tier S3 bucket name (QL_S3_BUCKET).",
+    )
+    s3_region: str = Field(
+        default="us-east-1",
+        description="AWS region of the cold-tier bucket (QL_S3_REGION).",
+    )
 
     # --- Operational ---
     environment: str = Field(default="development", pattern="^(development|staging|production)$")

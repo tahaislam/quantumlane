@@ -62,10 +62,10 @@ services:
       QL_TTC_TRIP_UPDATES_URL: ${QL_TTC_TRIP_UPDATES_URL:-https://bustime.ttc.ca/gtfsrt/trips}
       QL_TTC_SERVICE_ALERTS_URL: ${QL_TTC_SERVICE_ALERTS_URL:-https://bustime.ttc.ca/gtfsrt/alerts}
       QL_HTTP_USER_AGENT: ${QL_HTTP_USER_AGENT}
-      QL_R2_ENDPOINT_URL: ${QL_R2_ENDPOINT_URL}
-      QL_R2_ACCESS_KEY_ID: ${QL_R2_ACCESS_KEY_ID}
-      QL_R2_SECRET_ACCESS_KEY: ${QL_R2_SECRET_ACCESS_KEY}
-      QL_R2_BUCKET: ${QL_R2_BUCKET:-quantumlane}
+      QL_S3_ACCESS_KEY_ID: ${QL_S3_ACCESS_KEY_ID}
+      QL_S3_SECRET_ACCESS_KEY: ${QL_S3_SECRET_ACCESS_KEY}
+      QL_S3_BUCKET: ${QL_S3_BUCKET}
+      QL_S3_REGION: ${QL_S3_REGION:-us-east-1}
       QL_ENVIRONMENT: ${QL_ENVIRONMENT:-development}
       DAGSTER_CURRENT_IMAGE: quantumlane-ingestion:latest
       DAGSTER_POSTGRES_USER: dagster

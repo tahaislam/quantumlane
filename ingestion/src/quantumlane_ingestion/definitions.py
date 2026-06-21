@@ -17,7 +17,7 @@ from dagster import (
 
 from quantumlane_ingestion.assets import ops as ops_assets
 from quantumlane_ingestion.assets import ttc as ttc_assets
-from quantumlane_ingestion.resources import GTFSRTResource, PostgresResource, R2Resource
+from quantumlane_ingestion.resources import GTFSRTResource, PostgresResource, S3Resource
 from quantumlane_ingestion.settings import get_settings
 
 settings = get_settings()
@@ -34,11 +34,11 @@ resources = {
         timeout_seconds=settings.http_timeout_seconds,
         user_agent=settings.http_user_agent,
     ),
-    "r2": R2Resource(
-        endpoint_url=settings.r2_endpoint_url,
-        access_key_id=settings.r2_access_key_id,
-        secret_access_key=settings.r2_secret_access_key,
-        bucket=settings.r2_bucket,
+    "s3": S3Resource(
+        access_key_id=settings.s3_access_key_id,
+        secret_access_key=settings.s3_secret_access_key,
+        bucket=settings.s3_bucket,
+        region=settings.s3_region,
     ),
 }
 
