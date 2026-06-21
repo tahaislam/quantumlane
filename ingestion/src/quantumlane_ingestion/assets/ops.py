@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime, timedelta
 import pyarrow as pa
 import pyarrow.parquet as pq
 import structlog
-from dagster import MetadataValue, asset
+from dagster import MetadataValue, asset, DailyPartitionsDefinition
 
 from quantumlane_ingestion.resources import PostgresResource, S3Resource
 
@@ -262,14 +262,28 @@ def _drop_old_partitions(cur, parent: str, cutoff: date) -> list[str]:
     return dropped
 
 
+# -----------------------------------------------------------------------------
+# Cold-tier export (daily reload)
+# -----------------------------------------------------------------------------
+
+# Daily partitions for the cold-tier export. start_date is the earliest day that
+# could ever be archived; pick the day the cold tier began accumulating (the prod
+# reset / first real ingestion day). Partitions before any data existed will simply
+# find 0 rows and skip.
+EXPORT_PARTITIONS = DailyPartitionsDefinition(start_date="2026-06-18")
+
+
 @asset(
     name="daily_parquet_export",
     group_name="ops",
     compute_kind="python",
+    partitions_def=EXPORT_PARTITIONS,
     description=(
-        "Exports the prior day's realtime feeds to the S3 cold tier as Parquet. "
-        "Archives yesterday (not the partition about to drop) so there's a ~2-day "
-        "buffer to catch a failed export before retention removes the source."
+        "Exports one day's realtime feeds to the S3 cold tier as Parquet. "
+        "Partitioned by day: the partition key IS the day to archive, so past "
+        "partitions can be backfilled from the UI (limited to days still inside "
+        "the 3-day hot-tier retention window — older partitions have no source "
+        "data and skip)."
     ),
 )
 def daily_parquet_export(
@@ -278,39 +292,38 @@ def daily_parquet_export(
     s3: S3Resource,
 ) -> None:
     """
-    Cold-tier archival: one Parquet file per feed per day, written to S3 under a
-    Hive-style key (feed/dt=YYYY-MM-DD/part-0.parquet) so downstream Spark/Iceberg
-    can prune by partition.
+    Cold-tier archival, one Parquet file per feed per day, Hive-style keys
+    (feed/dt=YYYY-MM-DD/part-0.parquet).
 
-    Memory-safe by construction (the prod box is small and a day is millions of
-    rows): a named (server-side) cursor streams the day in chunks, and a held-open
-    ParquetWriter appends each chunk as a row group to a single local file before
-    upload — so the full day never materializes in RAM, and we avoid the
-    small-files problem.
+    Partitioned: `context.partition_key` is a 'YYYY-MM-DD' string naming the day
+    to archive. The nightly schedule targets yesterday's partition; backfills
+    target past partitions. Either way the logic is identical — read that day's
+    rows, write Parquet, upload.
 
-    Idempotent: the key is deterministic per (feed, day); a re-run overwrites that
-    day rather than duplicating it.
+    Backfill caveat: the hot tier keeps only 3 days. A partition older than the
+    oldest hot data finds 0 rows and records status 'skipped_no_data' rather than
+    failing — you cannot recover data retention already dropped.
 
-    Supersedes the v0.1 R2 stub. When the Iceberg cold tier (V0.3.3) lands, this
-    becomes the archive step that runs upstream of the retention drop in
-    daily_partition_maintenance (archive -> verify -> drop).
+    Memory-safe (named server-side cursor + held-open ParquetWriter) and
+    idempotent (deterministic key; a re-run overwrites that day).
     """
     if not s3.is_configured():
         context.log.warning("S3 not configured; skipping export.")
         context.add_output_metadata({"status": MetadataValue.text("skipped_no_s3")})
         return
 
-    # Yesterday, UTC. Half-open [day_start, day_end) so consecutive days never overlap.
-    target_day = (datetime.now(UTC) - timedelta(days=1)).date()
+    # The partition key is the target day. Half-open [day_start, day_end).
+    target_day = datetime.strptime(context.partition_key, "%Y-%m-%d").date()
     day_start = datetime.combine(target_day, datetime.min.time(), tzinfo=UTC)
     day_end = day_start + timedelta(days=1)
 
     client = s3.client()
     bucket = s3.bucket
 
-    context.log.info(f"cold-tier export for {target_day} ({day_start} .. {day_end})")
+    context.log.info(f"cold-tier export for partition {target_day} ({day_start} .. {day_end})")
 
     per_feed: dict[str, dict] = {}
+    any_rows = False
 
     with postgres.connection() as conn:
         for table, ts_col in EXPORT_FEEDS.items():
@@ -326,7 +339,6 @@ def daily_parquet_export(
             writer = None
             total_rows = 0
             try:
-                # Named cursor => server-side streaming; itersize bounds the fetch batch.
                 with conn.cursor(name=f"export_{table}_{target_day:%Y%m%d}") as cur:
                     cur.itersize = EXPORT_CHUNK_ROWS
                     cur.execute(query, (day_start, day_end))
@@ -349,6 +361,7 @@ def daily_parquet_export(
                     continue
                 writer.close()
                 writer = None
+                any_rows = True
 
                 key = f"{table}/dt={target_day.isoformat()}/part-0.parquet"
                 client.upload_file(local_path, bucket, key)
@@ -367,7 +380,7 @@ def daily_parquet_export(
 
     context.add_output_metadata(
         {
-            "status": MetadataValue.text("ok"),
+            "status": MetadataValue.text("ok" if any_rows else "skipped_no_data"),
             "target_day": MetadataValue.text(str(target_day)),
             "trip_updates_rows": MetadataValue.int(per_feed.get("trip_updates", {}).get("rows", 0)),
             "vehicle_positions_rows": MetadataValue.int(

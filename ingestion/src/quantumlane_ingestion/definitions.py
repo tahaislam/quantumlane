@@ -13,6 +13,7 @@ from dagster import (
     ScheduleDefinition,
     define_asset_job,
     load_assets_from_modules,
+    build_schedule_from_partitioned_job,
 )
 
 from quantumlane_ingestion.assets import ops as ops_assets
@@ -111,11 +112,10 @@ schedules = [
         execution_timezone="America/Toronto",
         default_status=DefaultScheduleStatus.RUNNING,
     ),
-    ScheduleDefinition(
-        name="parquet_export_daily",
-        job=parquet_export_daily_job,
-        cron_schedule="0 3 * * *",
-        execution_timezone="America/Toronto",
+    build_schedule_from_partitioned_job(
+        parquet_export_daily_job,
+        hour_of_day=3,
+        minute_of_hour=0,
         default_status=DefaultScheduleStatus.RUNNING,
     ),
     ScheduleDefinition(
