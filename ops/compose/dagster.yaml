@@ -53,6 +53,10 @@ run_coordinator:
   class: QueuedRunCoordinator
   config:
     max_concurrent_runs: 10
+    tag_concurrency_limits:
+      - key: "dagster/concurrency_key"
+        value: "backfill"
+        limit: 1
 
 # Retention: we keep Dagster's own event history for 30 days. Longer than that,
 # the dagster-postgres volume grows without bound for no operational benefit.
