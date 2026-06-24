@@ -77,3 +77,16 @@ compute_logs:
   class: LocalComputeLogManager
   config:
     base_dir: /tmp/dagster-compute-logs
+
+# Run monitoring: the daemon checks for runs that have died and marks them failed.
+run_monitoring:
+  enabled: true
+  # How often the daemon checks for runs whose process has died.
+  poll_interval_seconds: 120
+  # A run in STARTING that never reaches STARTED within this window is failed.
+  start_timeout_seconds: 300
+  # A run whose process vanishes (no heartbeat) is marked failed after this.
+  # (cancel path) how long a CANCELING run can hang before forced to CANCELED.
+  cancel_timeout_seconds: 300
+  # Max times the daemon will resume a run after a crash before giving up.
+  max_resume_run_attempts: 0
