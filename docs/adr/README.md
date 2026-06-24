@@ -25,6 +25,7 @@ We deliberately keep them short. The goal is to capture reasoning, not to write 
 | [005](005-static-html-no-framework.md) | Plain HTML for the website | Accepted |
 | [006](006-raw-sql-migrations.md) | Raw SQL migrations, not Alembic | Accepted |
 | [009](009-no-streaming-framework.md) | No Kafka / streaming framework | Accepted |
+| [017](017-event-time-delay-stop-level-overwrite) | Event delay / historical reliability | Accepted |
 
 ### Pending ADRs
 
