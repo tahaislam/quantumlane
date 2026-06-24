@@ -46,7 +46,7 @@ class Settings(BaseSettings):
         description="TTC ServiceAlerts feed URL.",
     )
     ttc_static_gtfs_url: str = Field(
-        default="https://opendata.toronto.ca/ttc/routes-and-schedules/OpenData_TTC_Schedules.zip",
+        default="https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/7795b45e-e65a-4465-81fc-c36b9dfff169/resource/cfb6b2b8-6191-41e3-bda1-b175c51148cb/download/TTC%20Routes%20and%20Schedules%20Data.zip",
         description="TTC static GTFS zip URL.",
     )
 

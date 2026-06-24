@@ -1,14 +1,19 @@
 """
-TTC GTFS-Realtime ingestion assets.
+TTC GTFS ingestion assets — realtime feeds and the static schedule loader.
 
-Each asset:
-    1. Fetches the protobuf payload from the TTC endpoint
-    2. Parses it into row dicts via the pure-functions parser
-    3. Bulk-inserts into the appropriate realtime table
-    4. Records a field signature for schema-drift detection
-    5. Updates ops.ingestion_runs
+Realtime assets (vehicle positions, trip updates, service alerts) each:
+    1. Fetch the protobuf payload from the TTC endpoint
+    2. Parse it into row dicts via the pure-functions parser
+    3. Bulk-insert into the appropriate realtime table
+    4. Record a field signature for schema-drift detection
+    5. Update ops.ingestion_runs
 
-Failure handling:
+Static asset (ttc_static_gtfs) downloads the TTC's published static GTFS zip and
+full-replaces the static_gtfs.* reference tables inside one transaction (atomic
+snapshot). It is non-partitioned: the TTC publishes only the *current* schedule,
+so there is nothing to backfill by date.
+
+Failure handling (realtime):
     Any uncaught exception is recorded in ops.ingestion_failures with a sample
     of the payload (first 4KB) before being re-raised so Dagster marks the run failed.
     Tenacity-level retries happen inside the GTFSRTResource for transient HTTP errors;
@@ -16,14 +21,17 @@ Failure handling:
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import csv
+import io
+import zipfile
+from datetime import UTC, date, datetime
 from typing import Any
 
+import httpx
 import psycopg
 import structlog
 from dagster import (
     Backoff,
-    DailyPartitionsDefinition,
     Jitter,
     MetadataValue,
     RetryPolicy,
@@ -323,41 +331,386 @@ def _upsert_service_alerts(conn: psycopg.Connection, rows: list[dict[str, Any]])
 
 
 # -----------------------------------------------------------------------------
-# Static GTFS (daily reload)
+# Static GTFS (daily full-replace load)
 # -----------------------------------------------------------------------------
+#
+# Non-partitioned: the TTC publishes only the *current* schedule — there's no
+# "schedule as of last Tuesday" to fetch, so there's nothing to backfill by date.
+# A plain ScheduleDefinition (definitions.py) drives the daily run.
+#
+# Full-replace (truncate-all + reload in one transaction) because the schema is
+# single-snapshot (PKs are NOT compound with snapshot_date) and the reference data
+# is small. One transaction gives atomic snapshot semantics — every query sees the
+# old schedule or the new one, never a mix. snapshot_date is just a "loaded-on" stamp.
+#
+# FK load order: agency -> routes -> stops -> trips -> stop_times. calendar and
+# calendar_dates are independent. shapes is large and map-only (v0.2); skipped.
+#
+# MEMORY: stop_times.txt is ~200 MB for TTC. It is NEVER parsed into a Python list
+# or an in-memory CSV buffer — it's streamed row-by-row from the open zip straight
+# into COPY (see _copy_stop_times), so only ~one row is resident at a time. The
+# small tables are parsed as lists (cheap). This keeps the loader within the small
+# box's memory budget. The whole DB load runs inside the open-zip context because
+# the stop_times stream reads from the live zip handle.
 
-# Daily partitioned: one materialization per day. The partition key is the snapshot date.
-DAILY_PARTITIONS = DailyPartitionsDefinition(start_date="2026-04-01")
+LOAD_SHAPES = False
+
+# Truncated together in one statement, which sidesteps per-table FK ordering for the
+# truncate (the load below still respects FK order).
+STATIC_TABLES = [
+    "static_gtfs.stop_times",
+    "static_gtfs.trips",
+    "static_gtfs.stops",
+    "static_gtfs.routes",
+    "static_gtfs.agency",
+    "static_gtfs.calendar",
+    "static_gtfs.calendar_dates",
+    "static_gtfs.shapes",
+]
+
+# GTFS zip magic bytes — guards against a moved/redirected URL returning HTML.
+_ZIP_MAGIC = b"PK\x03\x04"
+
+
+def _b(val: str | None) -> bool:
+    """GTFS 0/1 -> bool."""
+    return str(val).strip() == "1"
+
+
+def _i(val: str | None) -> int | None:
+    """Parse int; empty string -> None."""
+    if val is None or val.strip() == "":
+        return None
+    return int(val)
+
+
+def _f(val: str | None) -> float | None:
+    """Parse float; empty string -> None."""
+    if val is None or val.strip() == "":
+        return None
+    return float(val)
+
+
+def _t(val: str | None) -> str | None:
+    """Trim text; empty string -> None so optional columns are NULL, not ''."""
+    if val is None:
+        return None
+    v = val.strip()
+    return v or None
+
+
+def _interval(val: str | None) -> str | None:
+    """
+    GTFS time string ('HH:MM:SS', possibly >24h like '25:30:00') -> the same string.
+    Postgres parses it directly as an INTERVAL on input. Empty -> None.
+    """
+    if val is None or val.strip() == "":
+        return None
+    return val.strip()
+
+
+def _gtfs_date(val: str | None) -> date | None:
+    """GTFS date 'YYYYMMDD' -> date. Empty -> None."""
+    if val is None or val.strip() == "":
+        return None
+    s = val.strip()
+    return date(int(s[0:4]), int(s[4:6]), int(s[6:8]))
+
+
+def _csv_null(val: Any) -> str:
+    r"""Render None as the COPY NULL token (\N); everything else as its string."""
+    return r"\N" if val is None else str(val)
+
+
+def _read_csv(zf: zipfile.ZipFile, name: str) -> list[dict[str, str]]:
+    """Read one (small) GTFS .txt from the zip into dict rows.
+
+    For small tables only — do NOT use on stop_times (~200 MB), which is streamed.
+    Returns [] if the file isn't present. utf-8-sig strips a BOM so the first header
+    key isn't mangled.
+    """
+    try:
+        raw = zf.read(name)
+    except KeyError:
+        log.warning("gtfs_file_absent", file=name)
+        return []
+    text = io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8-sig")
+    return list(csv.DictReader(text))
 
 
 @asset(
     name="ttc_static_gtfs",
     group_name="ttc_static",
     compute_kind="python",
-    partitions_def=DAILY_PARTITIONS,
-    description="Daily snapshot of TTC's static GTFS zip. Full reload pattern (small data).",
+    description="Daily full-replace load of TTC's static GTFS into static_gtfs.* (atomic snapshot).",
 )
 def ttc_static_gtfs(
     context,
-    gtfs_rt: GTFSRTResource,
     postgres: PostgresResource,
 ) -> None:
     """
-    Reload the static GTFS reference tables.
+    Download the TTC static GTFS zip, parse the CSVs, and full-replace the
+    static_gtfs.* tables inside one transaction (atomic snapshot).
 
-    Why full reload, not incremental:
-        Static GTFS is small (a few MB unzipped). Incremental would require
-        diffing across snapshots, which adds complexity for no operational benefit
-        at this scale. Full reload inside a transaction also gives us atomic snapshot
-        semantics: queries either see the old data or the new, never a mix.
-
-    The implementation is stubbed for v0.1 — wiring up the zip download, csv parsing,
-    and bulk loads is straightforward but ~150 lines of mostly-mechanical code.
-    Track in v0.1.1 issue.
+    Non-partitioned and full-replace by design — see the module-level note above.
+    stop_times (~200 MB) is streamed into COPY to stay within memory.
     """
-    snapshot_date = context.partition_key
-    context.log.info(
-        f"static_gtfs reload for {snapshot_date} — implementation pending in v0.1.1. "
-        "See docs/ARCHITECTURE.md §4.1 for the design. The realtime feeds work without this."
+    settings = get_settings()
+    snapshot_date = datetime.now(UTC).date()
+
+    # 1. Download the zip.
+    url = settings.ttc_static_gtfs_url
+    context.log.info(f"Downloading static GTFS from {url}")
+    with httpx.Client(
+        timeout=settings.http_timeout_seconds,
+        headers={"User-Agent": settings.http_user_agent},
+        follow_redirects=True,
+    ) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+    zip_bytes = resp.content
+    context.log.info(f"Downloaded {len(zip_bytes) / 1e6:.1f} MB")
+
+    # Guard: a moved/redirected URL often returns an HTML page (200 OK), which would
+    # fail later with a cryptic BadZipFile. Fail early and clearly instead.
+    if not zip_bytes.startswith(_ZIP_MAGIC):
+        raise ValueError(
+            f"Downloaded content from {url} is not a zip (first bytes: {zip_bytes[:16]!r}). "
+            "The URL may have moved or returned an error page."
+        )
+
+    counts: dict[str, int] = {}
+
+    # 2+3. Parse small tables, then truncate-all + load — ALL inside the open-zip
+    # context, because stop_times streams directly from the zip handle into COPY.
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        agency_rows = _read_csv(zf, "agency.txt")
+        routes_rows = _read_csv(zf, "routes.txt")
+        stops_rows = _read_csv(zf, "stops.txt")
+        trips_rows = _read_csv(zf, "trips.txt")
+        calendar_rows = _read_csv(zf, "calendar.txt")
+        calendar_dates_rows = _read_csv(zf, "calendar_dates.txt")
+        # stop_times is NOT read here — streamed below to avoid OOM.
+        shapes_rows = _read_csv(zf, "shapes.txt") if LOAD_SHAPES else []
+
+        with postgres.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("TRUNCATE " + ", ".join(STATIC_TABLES))
+
+                # --- agency ---
+                agency_data = [
+                    (
+                        _t(r.get("agency_id")) or "ttc",
+                        _t(r.get("agency_name")),
+                        _t(r.get("agency_url")),
+                        _t(r.get("agency_timezone")),
+                        _t(r.get("agency_lang")),
+                        snapshot_date,
+                    )
+                    for r in agency_rows
+                ]
+                cur.executemany(
+                    "INSERT INTO static_gtfs.agency "
+                    "(agency_id, agency_name, agency_url, agency_timezone, agency_lang, snapshot_date) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    agency_data,
+                )
+                counts["agency"] = len(agency_data)
+
+                # --- routes ---
+                routes_data = [
+                    (
+                        _t(r.get("route_id")),
+                        _t(r.get("agency_id")) or "ttc",
+                        _t(r.get("route_short_name")),
+                        _t(r.get("route_long_name")),
+                        _i(r.get("route_type")),
+                        _t(r.get("route_color")),
+                        _t(r.get("route_text_color")),
+                        snapshot_date,
+                    )
+                    for r in routes_rows
+                ]
+                cur.executemany(
+                    "INSERT INTO static_gtfs.routes "
+                    "(route_id, agency_id, route_short_name, route_long_name, route_type, "
+                    " route_color, route_text_color, snapshot_date) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    routes_data,
+                )
+                counts["routes"] = len(routes_data)
+
+                # --- stops --- (lon FIRST in ST_MakePoint)
+                stops_data = [
+                    (
+                        _t(r.get("stop_id")),
+                        _t(r.get("stop_code")),
+                        _t(r.get("stop_name")),
+                        _t(r.get("stop_desc")),
+                        _f(r.get("stop_lon")),
+                        _f(r.get("stop_lat")),
+                        _t(r.get("zone_id")),
+                        _i(r.get("location_type")),
+                        _t(r.get("parent_station")),
+                        snapshot_date,
+                    )
+                    for r in stops_rows
+                ]
+                cur.executemany(
+                    "INSERT INTO static_gtfs.stops "
+                    "(stop_id, stop_code, stop_name, stop_desc, location, zone_id, "
+                    " location_type, parent_station, snapshot_date) "
+                    "VALUES (%s, %s, %s, %s, "
+                    "        ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography, "
+                    "        %s, %s, %s, %s)",
+                    stops_data,
+                )
+                counts["stops"] = len(stops_data)
+
+                # --- trips ---
+                trips_data = [
+                    (
+                        _t(r.get("trip_id")),
+                        _t(r.get("route_id")),
+                        _t(r.get("service_id")),
+                        _t(r.get("trip_headsign")),
+                        _i(r.get("direction_id")),
+                        _t(r.get("block_id")),
+                        _t(r.get("shape_id")),
+                        snapshot_date,
+                    )
+                    for r in trips_rows
+                ]
+                cur.executemany(
+                    "INSERT INTO static_gtfs.trips "
+                    "(trip_id, route_id, service_id, trip_headsign, direction_id, "
+                    " block_id, shape_id, snapshot_date) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    trips_data,
+                )
+                counts["trips"] = len(trips_data)
+
+                # --- stop_times --- (~200 MB: streamed from the zip into COPY)
+                counts["stop_times"] = _copy_stop_times(cur, zf, snapshot_date)
+
+                # --- calendar --- (0/1 -> bool, YYYYMMDD -> date)
+                calendar_data = [
+                    (
+                        _t(r.get("service_id")),
+                        _b(r.get("monday")),
+                        _b(r.get("tuesday")),
+                        _b(r.get("wednesday")),
+                        _b(r.get("thursday")),
+                        _b(r.get("friday")),
+                        _b(r.get("saturday")),
+                        _b(r.get("sunday")),
+                        _gtfs_date(r.get("start_date")),
+                        _gtfs_date(r.get("end_date")),
+                        snapshot_date,
+                    )
+                    for r in calendar_rows
+                ]
+                cur.executemany(
+                    "INSERT INTO static_gtfs.calendar "
+                    "(service_id, monday, tuesday, wednesday, thursday, friday, saturday, "
+                    " sunday, start_date, end_date, snapshot_date) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    calendar_data,
+                )
+                counts["calendar"] = len(calendar_data)
+
+                # --- calendar_dates ---
+                cal_dates_data = [
+                    (
+                        _t(r.get("service_id")),
+                        _gtfs_date(r.get("date")),
+                        _i(r.get("exception_type")),
+                        snapshot_date,
+                    )
+                    for r in calendar_dates_rows
+                ]
+                cur.executemany(
+                    "INSERT INTO static_gtfs.calendar_dates "
+                    "(service_id, exception_date, exception_type, snapshot_date) "
+                    "VALUES (%s, %s, %s, %s)",
+                    cal_dates_data,
+                )
+                counts["calendar_dates"] = len(cal_dates_data)
+
+                # --- shapes --- (skipped by default; map-only, v0.2)
+                if LOAD_SHAPES and shapes_rows:
+                    shapes_data = [
+                        (
+                            _t(r.get("shape_id")),
+                            _i(r.get("shape_pt_sequence")),
+                            _f(r.get("shape_pt_lon")),
+                            _f(r.get("shape_pt_lat")),
+                            _f(r.get("shape_dist_traveled")),
+                            snapshot_date,
+                        )
+                        for r in shapes_rows
+                    ]
+                    cur.executemany(
+                        "INSERT INTO static_gtfs.shapes "
+                        "(shape_id, shape_pt_sequence, shape_pt_location, shape_dist_traveled, "
+                        " snapshot_date) "
+                        "VALUES (%s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography, %s, %s)",
+                        shapes_data,
+                    )
+                    counts["shapes"] = len(shapes_data)
+
+            conn.commit()  # single atomic commit — the snapshot flips here
+
+    context.log.info(f"Static GTFS loaded for {snapshot_date}: {counts}")
+    context.add_output_metadata(
+        {
+            "snapshot_date": MetadataValue.text(str(snapshot_date)),
+            **{f"{k}_rows": MetadataValue.int(v) for k, v in counts.items()},
+            "shapes_loaded": MetadataValue.bool(LOAD_SHAPES),
+        }
     )
-    context.add_output_metadata({"status": "stub", "snapshot_date": snapshot_date})
+
+
+def _copy_stop_times(cur, zf: zipfile.ZipFile, snapshot_date: date) -> int:
+    """
+    Stream stop_times.txt from the open zip straight into COPY, one row at a time.
+
+    stop_times is ~200 MB for TTC — never materialize it as a Python list or an
+    in-memory CSV buffer (either would OOM the small box). We read a row from the
+    zip, format a single CSV line, write it to the COPY stream, and move on, holding
+    ~one row at a time.
+
+    arrival_time/departure_time are GTFS strings (possibly >24h) parsed by Postgres
+    as INTERVAL on input. Empty optional fields -> the COPY NULL token (\\N).
+    """
+    n = 0
+    line_buf = io.StringIO()
+    line_writer = csv.writer(line_buf)
+    with zf.open("stop_times.txt") as raw:
+        text = io.TextIOWrapper(raw, encoding="utf-8-sig")
+        reader = csv.DictReader(text)
+        with cur.copy(
+            "COPY static_gtfs.stop_times "
+            "(trip_id, stop_sequence, stop_id, arrival_time, departure_time, "
+            " pickup_type, drop_off_type, shape_dist_traveled, snapshot_date) "
+            "FROM STDIN WITH (FORMAT csv, NULL '\\N')"
+        ) as copy:
+            for r in reader:
+                line_buf.seek(0)
+                line_buf.truncate(0)
+                line_writer.writerow(
+                    [
+                        (r.get("trip_id") or "").strip(),
+                        _i(r.get("stop_sequence")),
+                        (r.get("stop_id") or "").strip(),
+                        _csv_null(_interval(r.get("arrival_time"))),
+                        _csv_null(_interval(r.get("departure_time"))),
+                        _csv_null(_i(r.get("pickup_type"))),
+                        _csv_null(_i(r.get("drop_off_type"))),
+                        _csv_null(_f(r.get("shape_dist_traveled"))),
+                        snapshot_date.isoformat(),
+                    ]
+                )
+                copy.write(line_buf.getvalue())
+                n += 1
+    return n
