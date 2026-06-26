@@ -16,7 +16,7 @@
         <a href="/freshness.html" class="hover:text-slate-900">Freshness</a>
         <a href="/explore.html" class="text-slate-900 font-medium">Explore</a>
         <a href="/architecture.html" class="hover:text-slate-900">Architecture</a>
-        <a href="https://github.com/tahaislam" class="hover:text-slate-900">GitHub</a>
+        <a href="https://github.com/tahaislam/quantumlane" class="hover:text-slate-900">GitHub</a>
       </nav>
     </div>
   </header>
@@ -25,54 +25,128 @@
     <h1 class="text-3xl font-bold mb-2">Explore</h1>
     <p class="text-slate-600 mb-8">
       Pre-canned queries against the live database. The SQL is shown alongside the result.
-      All queries hit the public API at <code class="text-xs bg-slate-200 px-1 py-0.5 rounded">api.quantumlane.io</code>.
+      All queries hit the public API at <code class="text-xs bg-slate-200 px-1 py-0.5 rounded">quantumlane.io/api</code>.
     </p>
 
     <article class="bg-white rounded-lg border border-slate-200 p-6 mb-6">
-      <h2 class="font-semibold mb-3">Daily ingestion volume (last 4 days)</h2>
+      <h2 class="font-semibold mb-3">Daily ingestion volume (last 14 days)</h2>
+      <p class="text-sm text-slate-500 mb-3">Record counts per feed per day, across both real-time feeds.</p>
       <pre class="bg-slate-900 text-slate-100 text-xs p-4 rounded overflow-x-auto mb-4"><code>SELECT received_at::date AS day,
        'ttc.vehicle_positions' AS feed_key,
        COUNT(*) AS record_count
 FROM realtime.vehicle_positions
-WHERE received_at &gt;= NOW() - INTERVAL '4 days'
+WHERE received_at &gt;= NOW() - INTERVAL '14 days'
 GROUP BY received_at::date
-ORDER BY day DESC;</code></pre>
+UNION ALL
+SELECT received_at::date AS day,
+       'ttc.trip_updates' AS feed_key,
+       COUNT(*) AS record_count
+FROM realtime.trip_updates
+WHERE received_at &gt;= NOW() - INTERVAL '14 days'
+GROUP BY received_at::date
+ORDER BY day DESC, feed_key;</code></pre>
       <div id="daily-stats" class="text-sm text-slate-500">Loading...</div>
     </article>
 
     <article class="bg-white rounded-lg border border-slate-200 p-6 mb-6">
       <h2 class="font-semibold mb-3">Vehicles currently in service</h2>
+      <p class="text-sm text-slate-500 mb-3">Most recent position per vehicle, looking back at most 5 minutes.</p>
       <pre class="bg-slate-900 text-slate-100 text-xs p-4 rounded overflow-x-auto mb-4"><code>SELECT DISTINCT ON (vehicle_id)
-    vehicle_id, route_id, ST_X(location::geometry) AS lon, ST_Y(location::geometry) AS lat
+    vehicle_id, route_id,
+    ST_Y(location::geometry) AS latitude,
+    ST_X(location::geometry) AS longitude,
+    speed_mps
 FROM realtime.vehicle_positions
 WHERE received_at &gt; NOW() - INTERVAL '5 minutes'
+  AND vehicle_id IS NOT NULL
 ORDER BY vehicle_id, received_at DESC
 LIMIT 20;</code></pre>
       <div id="vehicles-latest" class="text-sm text-slate-500">Loading...</div>
     </article>
 
+    <article class="bg-white rounded-lg border border-slate-200 p-6 mb-6">
+      <h2 class="font-semibold mb-3">Vehicles on a single route (the 504 King)</h2>
+      <p class="text-sm text-slate-500 mb-3">
+        Same query, filtered by <code class="text-xs bg-slate-200 px-1 py-0.5 rounded">route_id</code>.
+        This is the human-name → route_id bridge the upcoming MCP server is built around.
+      </p>
+      <pre class="bg-slate-900 text-slate-100 text-xs p-4 rounded overflow-x-auto mb-4"><code>SELECT DISTINCT ON (vehicle_id)
+    vehicle_id, route_id,
+    ST_Y(location::geometry) AS latitude,
+    ST_X(location::geometry) AS longitude,
+    speed_mps
+FROM realtime.vehicle_positions
+WHERE received_at &gt; NOW() - INTERVAL '5 minutes'
+  AND vehicle_id IS NOT NULL
+  AND route_id = '504'
+ORDER BY vehicle_id, received_at DESC;</code></pre>
+      <p class="text-xs text-slate-400 mb-4">
+        API: <code class="bg-slate-100 px-1 py-0.5 rounded">GET /v1/routes/504/vehicles</code>
+      </p>
+      <div id="vehicles-route" class="text-sm text-slate-500">Loading...</div>
+    </article>
+
+    <article class="bg-white rounded-lg border border-slate-200 p-6 mb-6">
+      <h2 class="font-semibold mb-3">Per-feed freshness</h2>
+      <p class="text-sm text-slate-500 mb-3">
+        The latest snapshot per feed — the same telemetry the
+        <a href="/freshness.html" class="text-sky-600 hover:underline">Freshness page</a> renders.
+        Note the latest-per-key pattern (<code class="text-xs bg-slate-200 px-1 py-0.5 rounded">DISTINCT ON</code>).
+      </p>
+      <pre class="bg-slate-900 text-slate-100 text-xs p-4 rounded overflow-x-auto mb-4"><code>SELECT DISTINCT ON (feed_key)
+    feed_key, status, lag_seconds,
+    record_count_5min, record_count_1h, last_record_at
+FROM ops.freshness_snapshot
+ORDER BY feed_key, snapshot_at DESC;</code></pre>
+      <div id="freshness-table" class="text-sm text-slate-500">Loading...</div>
+    </article>
+
     <article class="bg-white rounded-lg border border-slate-200 p-6">
       <h2 class="font-semibold mb-3">Recent ingestion runs</h2>
+      <p class="text-sm text-slate-500 mb-3">
+        Per-run records-written telemetry across all assets.
+      </p>
       <pre class="bg-slate-900 text-slate-100 text-xs p-4 rounded overflow-x-auto mb-4"><code>SELECT run_id, asset_key, started_at, status, records_written
 FROM ops.ingestion_runs
 ORDER BY started_at DESC
 LIMIT 20;</code></pre>
-      <div id="recent-runs" class="text-sm text-slate-500">Loading...</div>
+      <div id="recent-runs" class="text-sm text-slate-500">
+        <div class="p-4 text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded">
+          Endpoint and schema are wired, but per-run telemetry isn't being written yet —
+          this populates once the ingestion-run recorder is in place. Shown here as a
+          planned observability surface rather than live data.
+        </div>
+      </div>
     </article>
   </main>
 
   <footer class="border-t border-slate-200 bg-white mt-16">
     <div class="max-w-5xl mx-auto px-6 py-6 flex justify-between text-xs text-slate-500">
-      <span>QuantumLane v0.1 · MIT</span>
+      <span>QuantumLane v0.4 · MIT</span>
       <span>Built by <a href="https://www.linkedin.com/in/taha-islam" class="hover:text-slate-700">Islam Taha</a></span>
     </div>
   </footer>
 
   <script src="/static/app.js"></script>
   <script>
-    QL.fetchJSON('/v1/stats/daily').then(QL.renderDailyStats).catch(QL.renderError);
-    QL.fetchJSON('/v1/vehicle-positions/latest?limit=20').then(QL.renderVehiclesLatest).catch(QL.renderError);
-    QL.fetchJSON('/v1/ops/runs?limit=20').then(QL.renderRecentRuns).catch(QL.renderError);
+    // Each fetch has its own catch so one failing endpoint doesn't blank the others.
+    QL.fetchJSON('/v1/stats/daily')
+      .then(QL.renderDailyStats)
+      .catch(err => QL.renderErrorInto('daily-stats', err));
+
+    QL.fetchJSON('/v1/vehicle-positions/latest?limit=20')
+      .then(QL.renderVehiclesLatest)
+      .catch(err => QL.renderErrorInto('vehicles-latest', err));
+
+    QL.fetchJSON('/v1/routes/504/vehicles')
+      .then(p => QL.renderVehiclesInto('vehicles-route', p))
+      .catch(err => QL.renderErrorInto('vehicles-route', err));
+
+    QL.fetchFreshness()
+      .then(QL.renderFreshnessTable)
+      .catch(err => QL.renderErrorInto('freshness-table', err));
+
+    // Recent runs renders a static empty-state above; no fetch until telemetry exists.
   </script>
 </body>
 </html>

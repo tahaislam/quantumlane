@@ -151,6 +151,33 @@
     </table>`;
   }
 
+  // Parameterized version of renderVehiclesLatest, so a second vehicles card
+  // (e.g. route-filtered) can render into its own container.
+  function renderVehiclesInto(containerId, payload) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const items = payload.data || [];
+    if (items.length === 0) {
+      el.textContent = 'No vehicles in the last 5 minutes.';
+      return;
+    }
+    el.innerHTML = `<table class="w-full text-sm">
+      <thead class="text-xs uppercase text-slate-500"><tr>
+        <th class="text-left py-2">Vehicle</th><th class="text-left py-2">Route</th>
+        <th class="text-right py-2">Lat</th><th class="text-right py-2">Lon</th>
+        <th class="text-right py-2">Speed (m/s)</th>
+      </tr></thead>
+      <tbody>${items.map(v => `
+        <tr class="border-t border-slate-100">
+          <td class="py-2 font-mono text-xs">${escapeHTML(v.vehicle_id)}</td>
+          <td class="py-2">${escapeHTML(v.route_id || '—')}</td>
+          <td class="py-2 text-right">${v.latitude?.toFixed(4) || '—'}</td>
+          <td class="py-2 text-right">${v.longitude?.toFixed(4) || '—'}</td>
+          <td class="py-2 text-right">${v.speed_mps?.toFixed(1) || '—'}</td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+  }
+
   function renderRecentRuns(payload) {
     const el = document.getElementById('recent-runs');
     if (!el) return;
@@ -184,10 +211,21 @@
       });
   }
 
+  // Scoped error renderer: writes the error into ONE container instead of
+  // blanking every known container the way renderError does.
+  function renderErrorInto(containerId, err) {
+    console.error(err);
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = `<div class="p-4 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded">
+      Failed to fetch data from the API. ${escapeHTML(err.message || 'Unknown error')}
+    </div>`;
+  }
+
   window.QL = {
     fetchJSON, fetchFreshness,
     renderFreshnessSummary, renderFreshnessTable,
-    renderDailyStats, renderVehiclesLatest, renderRecentRuns,
-    renderError,
+    renderDailyStats, renderVehiclesLatest, renderVehiclesInto, renderRecentRuns,
+    renderError, renderErrorInto,
   };
 })();

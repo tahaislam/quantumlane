@@ -16,7 +16,7 @@
         <a href="/freshness.html" class="text-slate-900 font-medium">Freshness</a>
         <a href="/explore.html" class="hover:text-slate-900">Explore</a>
         <a href="/architecture.html" class="hover:text-slate-900">Architecture</a>
-        <a href="https://github.com/tahaislam" class="hover:text-slate-900">GitHub</a>
+        <a href="https://github.com/tahaislam/quantumlane" class="hover:text-slate-900">GitHub</a>
       </nav>
     </div>
   </header>
@@ -24,8 +24,9 @@
   <main class="max-w-5xl mx-auto px-6 py-12">
     <h1 class="text-3xl font-bold mb-2">Pipeline freshness</h1>
     <p class="text-slate-600 mb-8">
-      Per-feed observability. Polled every 10 seconds.
-      Status is computed from lag against thresholds defined in
+      Per-feed observability, updated continuously. The backend recomputes a freshness
+      snapshot every minute; this page re-reads it on a short interval. Status is computed
+      from lag against thresholds defined in
       <code class="text-xs bg-slate-200 px-1 py-0.5 rounded">ingestion/assets/ops.py</code>.
     </p>
 
@@ -49,7 +50,7 @@
 
   <footer class="border-t border-slate-200 bg-white mt-16">
     <div class="max-w-5xl mx-auto px-6 py-6 flex justify-between text-xs text-slate-500">
-      <span>QuantumLane v0.1 · MIT</span>
+      <span>QuantumLane v0.4 · MIT</span>
       <span>Built by <a href="https://www.linkedin.com/in/taha-islam" class="hover:text-slate-700">Islam Taha</a></span>
     </div>
   </footer>

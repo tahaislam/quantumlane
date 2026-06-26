@@ -16,7 +16,7 @@
         <a href="/freshness.html" class="hover:text-slate-900">Freshness</a>
         <a href="/explore.html" class="hover:text-slate-900">Explore</a>
         <a href="/architecture.html" class="text-slate-900 font-medium">Architecture</a>
-        <a href="https://github.com/tahaislam" class="hover:text-slate-900">GitHub</a>
+        <a href="https://github.com/tahaislam/quantumlane" class="hover:text-slate-900">GitHub</a>
       </nav>
     </div>
   </header>
@@ -27,7 +27,7 @@
       QuantumLane is a single-box data platform that demonstrates production patterns
       at the smallest scale that still requires real engineering.
       The full architecture document with ADRs lives in
-      <a href="https://github.com/tahaislam">the repo</a>; what follows is the summary.
+      <a href="https://github.com/tahaislam/quantumlane">the repo</a>; what follows is the summary.
     </p>
 
     <h2>Principles</h2>
@@ -37,7 +37,8 @@
       <li><strong>Document the trade-off, not the tool.</strong></li>
       <li><strong>Schema is contract.</strong> Forward-only migrations, never <code>ALTER TABLE</code> in psql.</li>
       <li><strong>Local dev = production in a smaller box.</strong></li>
-      <li><strong>Cost discipline is part of the design.</strong> Target: under CAD $20/month all-in.</li>
+      <li><strong>Model by access pattern, not by volume.</strong> The right store and grain follow from how data is read, not how much there is.</li>
+      <li><strong>Cost discipline is part of the design.</strong></li>
     </ol>
 
     <h2>Stack</h2>
@@ -46,29 +47,75 @@
       <tbody>
         <tr><td>Orchestration</td><td>Dagster</td><td>Asset-centric model; lighter than Airflow at single-box scale.</td></tr>
         <tr><td>Database</td><td>PostgreSQL 16 + PostGIS</td><td>One store at this scale; best-in-class geospatial.</td></tr>
-        <tr><td>Object storage</td><td>Cloudflare R2</td><td>Free egress matters for public dataset publishing.</td></tr>
+        <tr><td>Object storage</td><td>Amazon S3</td><td>Cold-tier Parquet archive with Hive-style partitioned keys.</td></tr>
         <tr><td>API</td><td>FastAPI + Pydantic v2</td><td>Async, auto OpenAPI, modern validation.</td></tr>
-        <tr><td>Website</td><td>Plain HTML + Tailwind CDN</td><td>4 pages, monthly updates — no build system needed.</td></tr>
+        <tr><td>Website</td><td>Plain HTML + Tailwind CDN</td><td>A few pages, monthly updates — no build system needed.</td></tr>
         <tr><td>Reverse proxy</td><td>Caddy</td><td>Automatic TLS, dead-simple config.</td></tr>
-        <tr><td>Host</td><td>Hetzner CAX21 (~CAD $11/mo)</td><td>10x cheaper than AWS for the same patterns.</td></tr>
+        <tr><td>Host</td><td>Hetzner CPX21</td><td>Far cheaper than AWS for the same patterns.</td></tr>
       </tbody>
     </table>
 
-    <h2>What's in v0.1</h2>
+    <h2>Hot / cold split</h2>
+    <p>
+      Real-time data lands in a <strong>hot tier</strong> (PostgreSQL/PostGIS) that serves
+      live API reads and near-real-time queries. A daily job archives it to a
+      <strong>cold tier</strong> — Parquet on S3, partitioned by UTC day with Hive-style keys —
+      for historical analytics. The two paths are deliberately separate: live operational
+      queries and historical aggregation have different access patterns, so they get
+      different stores rather than one general-purpose table doing both jobs.
+    </p>
+    <p>
+      Both ingestion and archival are written to stay within memory on a small box.
+      Large static GTFS files (e.g. <code>stop_times</code>, ~4M rows) stream row-by-row
+      into <code>COPY</code> from the open archive; the Parquet export reads through a
+      server-side cursor into a held-open writer rather than materializing the result set.
+    </p>
+
+    <h2>Delay &amp; reliability</h2>
+    <p>
+      Three features share the word "delay" but are modelled separately, each by its access pattern:
+    </p>
     <ul>
-      <li>TTC GTFS-RT ingestion: vehicle positions (every 30s), trip updates (every 30s), service alerts (every 5m).</li>
-      <li>Static GTFS daily refresh.</li>
-      <li>PostgreSQL 16 + PostGIS, daily-partitioned realtime tables, retention to 30 days.</li>
-      <li>FastAPI public API with rate limiting.</li>
-      <li>Per-feed freshness telemetry surfaced on this site.</li>
+      <li><strong>Headway regularity</strong> — real-time only, no schedule dependency.
+        (The TTC RT <code>delay</code> fields arrive all-NULL, so headway is the viable RT-only signal.)</li>
+      <li><strong>Live schedule-adherence delay</strong> — hot-tier, computed on read against the static schedule.</li>
+      <li><strong>Historical reliability</strong> — daily OLAP aggregation of event-time-computed delays,
+        not a recompute from raw real-time plus schedule. This avoids keeping a history of schedule
+        snapshots and sidesteps a daily-refresh race.</li>
+    </ul>
+    <p>
+      The mechanism underneath is a stop-level overwrite: one row per
+      <code>(trip_id, stop_sequence)</code>, upserted as predictions arrive and finalized on arrival.
+      A large volume of superseded predictions collapses to one durable row per stop-event,
+      which then feeds both the live gauge and the historical aggregate from a single source.
+    </p>
+
+    <h2>What's in v0.4</h2>
+    <ul>
+      <li>TTC GTFS-RT ingestion: vehicle positions and trip updates every minute, service alerts every 5 minutes.</li>
+      <li>TTC static GTFS daily full-replace (04:00 Toronto), with the large <code>stop_times</code> file streamed via <code>COPY</code>.</li>
+      <li>PostgreSQL 16 + PostGIS hot tier; daily-partitioned real-time tables with a 3-day retention window and daily partition maintenance.</li>
+      <li>Daily Parquet export to S3 cold storage, partitioned by UTC day with Hive-style keys.</li>
+      <li>FastAPI public read-only API with rate limiting.</li>
+      <li>Per-feed freshness telemetry, refreshed every minute and surfaced on this site.</li>
       <li>Schema-drift detection via field-population signatures.</li>
-      <li>Daily parquet exports to R2 (cold storage).</li>
+      <li>Dagster run monitoring for stuck/zombie runs.</li>
     </ul>
 
-    <h2>What's deliberately not in v0.1</h2>
+    <h2>Planned</h2>
     <ul>
-      <li>Other agencies (GO, MiWay, Brampton) — coming in v0.2 with the schema heterogeneity story.</li>
-      <li>Streaming framework (Kafka, etc.) — overkill at <100 msg/sec.</li>
+      <li><strong>MCP server</strong> — a Model Context Protocol server over the public API, letting LLM
+        clients (Claude, ChatGPT) answer live transit questions: vehicles on a route (with human-name →
+        <code>route_id</code> resolution), nearest stops via PostGIS, and route lookup. Wraps the deployed
+        HTTP API; remote-hosted and publicly accessible.</li>
+      <li><strong>Historical reliability</strong> — the daily OLAP aggregation described above, once the
+        stop-level finalize path is built out.</li>
+      <li><strong>Other agencies</strong> — GO Transit, MiWay, and other GTA feeds, with the schema-heterogeneity story.</li>
+    </ul>
+
+    <h2>Deliberately not here</h2>
+    <ul>
+      <li>Streaming framework (Kafka, etc.) — overkill at this message rate.</li>
       <li>ML / forecasting — needs more historical data first.</li>
       <li>Authentication — public data, public API.</li>
       <li>Pretty map UIs — not the point.</li>
@@ -76,14 +123,17 @@
 
     <h2>Cost</h2>
     <p>
-      Under CAD $15/month all-in: one Hetzner CAX21 ARM box (~$11),
-      Cloudflare R2 free tier (10 GB), Cloudflare DNS free, GitHub Actions free, domain ~$15/year.
+      Cost discipline is treated as a design constraint, not an afterthought: a single small
+      Hetzner box, an S3 cold tier sized to what the analytics actually need, and free-tier
+      DNS and CI. The architecture is chosen so the running cost stays low and predictable —
+      the cold-tier read path in particular is designed around egress, which is why historical
+      bulk access is handled differently from the always-free hot-tier live queries.
     </p>
   </main>
 
   <footer class="border-t border-slate-200 bg-white mt-16">
     <div class="max-w-5xl mx-auto px-6 py-6 flex justify-between text-xs text-slate-500">
-      <span>QuantumLane v0.1 · MIT</span>
+      <span>QuantumLane v0.4 · MIT</span>
       <span>Built by <a href="https://www.linkedin.com/in/taha-islam" class="hover:text-slate-700">Islam Taha</a></span>
     </div>
   </footer>
