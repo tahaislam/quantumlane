@@ -14,6 +14,7 @@
 #   dagster-daemon      — scheduler + sensor daemon
 #   dagster-code        — the user code server (loads our ingestion package)
 #   api                 — FastAPI
+#   mcp                 — FastMCP (MCP server)
 #   caddy               — reverse proxy + automatic TLS, serves website
 
 name: quantumlane
@@ -141,6 +142,21 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  mcp:
+    build:
+      context: ../../mcp
+      dockerfile: Dockerfile
+    image: quantumlane-mcp
+    restart: unless-stopped
+    environment:
+      # Point the MCP at the public API. Keeps the "wraps the same public API
+      # anyone can hit" story literally true. (Alternative: http://api:8000/api to
+      # skip the public round-trip via the compose network — marginally faster, but
+      # bypasses the public rate-limit path. Public URL is the cleaner demo story.)
+      QL_API_BASE: ${QL_MCP_API_BASE:-https://quantumlane.io/api}
+    depends_on:
+      - api
 
   caddy:
     image: caddy:2-alpine

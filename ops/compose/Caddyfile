@@ -3,13 +3,19 @@
 # Serves:
 #   /                → static website
 #   /static/*        → static assets (JS, CSS)
-#   /v1/*            → FastAPI
-#   /api/docs        → FastAPI OpenAPI docs
+#   /v1/*            → FastAPI (versioned API + health)
+#   /api/docs        → FastAPI OpenAPI docs (/api/* prefix is stripped → FastAPI /docs)
 #   /api/*           → FastAPI
-#   /dagster/*       → Dagster UI (optional, can be disabled in prod if you don't want it public)
+#   /mcp*            → MCP server (FastMCP, streamable HTTP). Path PRESERVED (not stripped).
+#   /dagster/*       → Dagster UI (dedicated port 3000; not exposed in prod)
 #
-# Local dev: use http://localhost:8080 (the :local site below).
-# Prod: replace `quantumlane.io` with your actual domain. Caddy auto-provisions TLS.
+# Local dev: use http://localhost:8080 (the :8080 site below).
+# Prod: quantumlane.io; Caddy auto-provisions TLS.
+#
+# Route-handling note: /api/* uses `handle_path` (STRIPS the prefix, so /api/docs →
+# FastAPI /docs), but /mcp* uses plain `handle` (PRESERVES the path, because the
+# FastMCP app's own route is /mcp — stripping it would 404). Don't unify these; the
+# two services want opposite prefix behavior.
 
 # -------------------- local --------------------
 :8080 {
@@ -23,6 +29,12 @@
     }
     handle /health {
         reverse_proxy api:8000
+    }
+    # MCP server. Path is PRESERVED (handle, not handle_path) — the FastMCP app
+    # serves at /mcp, so Caddy must forward /mcp intact. mcp:8100 is reached over
+    # the compose network (the mcp service publishes no host port).
+    handle /mcp* {
+        reverse_proxy mcp:8100
     }
     handle {
         root * /srv/website
@@ -63,6 +75,14 @@ quantumlane.io {
     }
     handle /health {
         reverse_proxy api:8000
+    }
+    # MCP server — public endpoint for LLM clients (Claude, ChatGPT) at
+    # https://quantumlane.io/mcp. Path PRESERVED (handle, not handle_path): the
+    # FastMCP app's route is /mcp. If this ever 404s, this stripping choice is the
+    # first thing to check. If streamed tool calls hang/truncate, add
+    # `{ flush_interval -1 }` to disable response buffering.
+    handle /mcp* {
+        reverse_proxy mcp:8100
     }
     handle {
         root * /srv/website
