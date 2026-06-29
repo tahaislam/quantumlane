@@ -29,6 +29,7 @@ from quantumlane_api.schemas import (
     IngestionRun,
     Meta,
     Route,
+    Stop,
     VehiclePosition,
 )
 from quantumlane_api.settings import get_settings
@@ -174,6 +175,46 @@ def list_routes(request: Request) -> Envelope[list[Route]]:
         "FROM static_gtfs.routes ORDER BY route_short_name"
     )
     return Envelope(data=[Route(**r) for r in rows], meta=_meta())
+
+
+@app.get("/v1/stops/nearby", tags=["catalog"], response_model=Envelope[list[Stop]])
+@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
+def stops_nearby(
+    request: Request,
+    lat: float,
+    lon: float,
+    limit: int = 10,
+) -> Envelope[list[Stop]]:
+    """
+    Stops nearest to a coordinate, closest first.
+
+    Uses the GIST index (idx_stops_location) via the <-> KNN operator. location is
+    `geography`, so ST_Distance returns METERS. lon-FIRST in ST_MakePoint, same as
+    the loader and the vehicle-positions query.
+    """
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="limit must be 1..100")
+    if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+        raise HTTPException(status_code=400, detail="lat must be -90..90, lon -180..180")
+
+    sql = """
+        SELECT
+            stop_id,
+            stop_code,
+            stop_name,
+            ST_Y(location::geometry) AS latitude,
+            ST_X(location::geometry) AS longitude,
+            ST_Distance(
+                location,
+                ST_SetSRID(ST_MakePoint(%(lon)s, %(lat)s), 4326)::geography
+            ) AS distance_m
+        FROM static_gtfs.stops
+        WHERE location IS NOT NULL
+        ORDER BY location <-> ST_SetSRID(ST_MakePoint(%(lon)s, %(lat)s), 4326)::geography
+        LIMIT %(limit)s
+    """
+    rows = db.fetch_all(sql, {"lon": lon, "lat": lat, "limit": limit})
+    return Envelope(data=[Stop(**r) for r in rows], meta=_meta())
 
 
 @app.get("/v1/routes/{route_id}/vehicles", tags=["realtime"], response_model=Envelope[list[VehiclePosition]])

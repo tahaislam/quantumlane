@@ -78,3 +78,13 @@ class IngestionRun(BaseModel):
     completed_at: datetime | None
     status: str
     records_written: int | None
+
+
+class Stop(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    stop_id: str
+    stop_code: str | None
+    stop_name: str | None
+    latitude: float
+    longitude: float
+    distance_m: float | None = None

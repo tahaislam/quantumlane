@@ -54,14 +54,14 @@ def connection() -> Iterator[psycopg.Connection]:
         yield conn
 
 
-def fetch_all(sql: str, params: tuple = ()) -> list[dict]:
+def fetch_all(sql: str, params: tuple | dict = ()) -> list[dict]:
     with connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
             return cur.fetchall()
 
 
-def fetch_one(sql: str, params: tuple = ()) -> dict | None:
+def fetch_one(sql: str, params: tuple | dict = ()) -> dict | None:
     with connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
