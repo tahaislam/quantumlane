@@ -16,6 +16,7 @@ justify a settings module, so it's read here directly. If config ever grows
 from __future__ import annotations
 
 import os
+import re
 
 import httpx
 
@@ -58,29 +59,74 @@ def stops_near(lat: float, lon: float, limit: int) -> list[dict]:
     return get("/v1/stops/nearby", params={"lat": lat, "lon": lon, "limit": limit}).get("data", [])
 
 
+def _route_words(long_name: str | None) -> set[str]:
+    """Lowercased word tokens of a route long name, punctuation stripped.
+
+    '504 King' -> {'504', 'king'};  '12 Kingston Rd' -> {'12', 'kingston', 'rd'}.
+    Used so 'king' matches the WORD 'King', not the prefix of 'Kingston'.
+    """
+    if not long_name:
+        return set()
+    # Split on any non-alphanumeric run, drop empties.
+    return {w for w in re.split(r"[^a-z0-9]+", long_name.lower()) if w}
+
+
 def resolve_route(route: str) -> dict | None:
     """Resolve a human route string ('504', 'King', 'Dufferin') to a route record.
 
     The human-name -> route_id bridge: the crux of the tool design. The model passes
-    what the user said; we match it against the route catalog.
+    what the user said; we match it against the route catalog. Designed around a real
+    failure: a naive substring match maps 'King' -> '12 Kingston Rd' (a bus) because
+    'king' is a substring of 'kingston'. A rider saying 'King' means the 504 streetcar.
 
     Match strategy, most-specific first:
-        1. exact route_short_name  ('504' -> the 504)
-        2. case-insensitive substring of route_long_name ('king' -> '504 King')
-    Returns the first matching route record, or None if nothing matches.
+        1. exact route_short_name           ('504' -> the 504)
+        2. WHOLE-WORD match in long_name, preferring lower route_type on ties.
+           Word-boundary (not substring) so 'king' matches the word 'King' in
+           '504 King' but NOT 'Kingston'. route_type tiebreak encodes the domain
+           fact that named routes ('King', 'Queen', 'Spadina') are the streetcars:
+           GTFS route_type 0=streetcar, 1=subway, 3=bus — lower wins, so a named
+           match resolves to the streetcar over a same-named bus.
+        3. substring fallback (last resort) for partial inputs that aren't whole
+           words (e.g. a typo or fragment); also route_type-preferred.
+
+    Returns the single best matching route record, or None if nothing matches.
+
+    NOTE (alternative design): instead of picking one on ambiguity, we could return
+    ALL name matches and let the model disambiguate ('did you mean 504 King streetcar
+    or 12 Kingston Rd bus?'). That's arguably more correct for an LLM client but costs
+    a round-trip on every ambiguous call. We pick-best here so the common case
+    ('King' -> 504) just works; revisit if ambiguous routes need surfacing.
 
     Lives here (not in server.py) because it's pure data-access logic with real
-    failure modes — and that makes it the one piece genuinely worth unit-testing.
+    failure modes — the one piece genuinely worth unit-testing.
     """
     routes = list_routes()
     q = route.strip().lower()
 
-    # 1. exact short_name (the route number people usually mean)
+    # 1. exact short_name (the route number people usually mean) — unambiguous, wins.
     for r in routes:
         if (r.get("route_short_name") or "").lower() == q:
             return r
-    # 2. substring of long name ('king' in '504 King')
-    for r in routes:
-        if q in (r.get("route_long_name") or "").lower():
-            return r
+
+    def _route_type(r: dict) -> int:
+        # Missing/None route_type sorts last (treat as a high number).
+        rt = r.get("route_type")
+        return rt if isinstance(rt, int) else 99
+
+    # 2. whole-word match in long_name, preferring lower route_type (streetcar/subway
+    #    over bus) on ties. This is the fix for 'King' -> 'Kingston'.
+    word_matches = [r for r in routes if q in _route_words(r.get("route_long_name"))]
+    if word_matches:
+        return min(word_matches, key=_route_type)
+
+    # 3. substring fallback (last resort) for non-whole-word fragments, still
+    #    route_type-preferred. Kept so partial inputs degrade gracefully rather than
+    #    returning nothing — but ranked below whole-word so it can't hijack 'King'.
+    substr_matches = [
+        r for r in routes if q in (r.get("route_long_name") or "").lower()
+    ]
+    if substr_matches:
+        return min(substr_matches, key=_route_type)
+
     return None

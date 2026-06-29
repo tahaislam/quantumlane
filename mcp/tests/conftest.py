@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import pytest
 
-# A small slice of a realistic TTC route catalog: a streetcar, a bus, a subway.
+# A small slice of a realistic TTC route catalog: streetcars, buses, a subway.
+# Includes BOTH '504 King' (streetcar, route_type 0) and '12 Kingston Rd' (bus,
+# route_type 3) so the 'King' must not resolve to 'Kingston' regression is testable.
 FAKE_ROUTES = [
     {"route_id": "r-504", "route_short_name": "504", "route_long_name": "504 King", "route_type": 0},
     {"route_id": "r-501", "route_short_name": "501", "route_long_name": "501 Queen", "route_type": 0},
+    {"route_id": "r-12", "route_short_name": "12", "route_long_name": "12 Kingston Rd", "route_type": 3},
     {"route_id": "r-29", "route_short_name": "29", "route_long_name": "29 Dufferin", "route_type": 3},
     {"route_id": "r-line1", "route_short_name": "1", "route_long_name": "Line 1 Yonge-University", "route_type": 1},
 ]

@@ -33,11 +33,41 @@ def test_resolve_exact_short_name():
     assert r["route_id"] == "r-504"
 
 
+def test_resolve_king_is_not_kingston():
+    """REGRESSION: 'King' must resolve to the 504 King streetcar, NOT 12 Kingston Rd.
+
+    The original substring match mapped 'king' -> 'kingston rd' because 'king' is a
+    substring of 'kingston'. Word-boundary matching fixes this: 'king' matches the
+    WORD 'King' in '504 King' but not the prefix of 'Kingston'.
+    """
+    r = api_client.resolve_route("King")
+    assert r is not None
+    assert r["route_id"] == "r-504", f"expected 504 King, got {r['route_long_name']}"
+
+
 def test_resolve_is_case_insensitive_on_long_name():
-    """'king' (lowercase, partial) matches '504 King' via long-name substring."""
+    """'king' (lowercase) matches '504 King' via whole-word match."""
     r = api_client.resolve_route("king")
     assert r is not None
     assert r["route_id"] == "r-504"
+
+
+def test_resolve_kingston_still_works_as_whole_word():
+    """'Kingston' (the actual word) still resolves to the 12 Kingston Rd bus."""
+    r = api_client.resolve_route("Kingston")
+    assert r is not None
+    assert r["route_id"] == "r-12"
+
+
+def test_resolve_prefers_streetcar_on_name_tie():
+    """If a name matched both a streetcar and a bus, the lower route_type wins.
+
+    (Synthetic check of the tiebreak: 'King' matches only the streetcar here, but
+    the min-by-route_type logic is what guarantees streetcar-over-bus when a name
+    genuinely collides. Documented as the domain rule: named routes are streetcars.)
+    """
+    r = api_client.resolve_route("King")
+    assert r["route_type"] == 0  # streetcar, not a bus
 
 
 def test_resolve_short_name_beats_long_name():
