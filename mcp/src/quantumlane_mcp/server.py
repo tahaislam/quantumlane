@@ -137,9 +137,27 @@ def list_routes() -> dict:
 def main() -> None:
     """Console-script / module entry point. Serves streamable HTTP for remote clients.
 
-    Binds 0.0.0.0:8100; Caddy terminates TLS and proxies /mcp here.
+    Binds 0.0.0.0:8100; Caddy terminates TLS and proxies /mcp here. A per-IP rate
+    limit (60 req/min) guards the small shared box against a looping/abusive client
+    — see ratelimit.py. The cost risk is nil (nothing metered in the path); the real
+    risk is resource exhaustion of the Postgres that live ingestion shares.
     """
-    mcp.run(transport="http", host="0.0.0.0", port=8100)
+    from quantumlane_mcp.ratelimit import RateLimitMiddleware
+
+    # Attach the rate limiter to FastMCP's underlying ASGI app, then run that app
+    # under uvicorn. FastMCP builds a Starlette app for the streamable-HTTP
+    # transport; we wrap it so every request passes the per-IP limiter first.
+    #
+    # NOTE: FastMCP's app-accessor method name has shifted across versions. As of
+    # 3.x it is `http_app()`. If this raises AttributeError on your version, check
+    # the FastMCP docs for the current accessor (older: `streamable_http_app()`),
+    # or fall back to `mcp.run(...)` without the limiter and put the rate limit at
+    # Caddy instead.
+    import uvicorn
+
+    app = mcp.http_app()  # Starlette ASGI app for the HTTP transport
+    app.add_middleware(RateLimitMiddleware, limit=60, window_seconds=60)
+    uvicorn.run(app, host="0.0.0.0", port=8100)
 
 
 if __name__ == "__main__":

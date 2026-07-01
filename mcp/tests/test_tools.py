@@ -15,6 +15,10 @@ import pytest
 
 from quantumlane_mcp import api_client, server
 
+# The real (caching) list_routes, captured before any fixture stubs it — so the
+# cache tests can restore it while other tests use the fake.
+_REAL_LIST_ROUTES = api_client.list_routes
+
 
 # ---------------------------------------------------------------------------
 # resolve_route — the core logic worth covering
@@ -22,7 +26,13 @@ from quantumlane_mcp import api_client, server
 
 @pytest.fixture(autouse=True)
 def _patch_list_routes(monkeypatch, fake_routes):
-    """Make api_client.list_routes() return the fake catalog, no network."""
+    """Make api_client.list_routes() return the fake catalog, no network.
+
+    Also reset the module-global route cache so cache state never leaks between
+    tests (the cache tests below manipulate it directly).
+    """
+    api_client._routes_cache = None
+    api_client._routes_cached_at = 0.0
     monkeypatch.setattr(api_client, "list_routes", lambda: fake_routes)
 
 
@@ -185,3 +195,76 @@ def test_list_routes_shape(fake_routes):
     out = server.list_routes()
     assert out["route_count"] == len(fake_routes)
     assert out["routes"] == fake_routes
+
+
+# ---------------------------------------------------------------------------
+# Route-catalog cache (1h TTL, matching the daily static-GTFS reload)
+# ---------------------------------------------------------------------------
+
+def test_route_cache_hits_once_then_serves_cached(monkeypatch):
+    """Repeated list_routes calls fetch the catalog once, then serve from cache."""
+    # Restore the REAL (caching) list_routes over the fixture's stub, and fake the
+    # `get` underneath it so we can count actual fetches.
+    monkeypatch.setattr(api_client, "list_routes", _REAL_LIST_ROUTES)
+    calls = {"n": 0}
+
+    def fake_get(path, params=None):
+        calls["n"] += 1
+        return {"data": [{"route_id": "r-504", "route_short_name": "504",
+                          "route_long_name": "504 King", "route_type": 0}]}
+
+    monkeypatch.setattr(api_client, "get", fake_get)
+    api_client._routes_cache = None
+    api_client._routes_cached_at = 0.0
+
+    api_client.list_routes()
+    api_client.list_routes()
+    api_client.list_routes()
+    assert calls["n"] == 1  # fetched once, then cached
+
+
+def test_route_cache_refetches_after_ttl(monkeypatch):
+    """After the 1h TTL elapses, the catalog is re-fetched."""
+    import time
+    monkeypatch.setattr(api_client, "list_routes", _REAL_LIST_ROUTES)
+    calls = {"n": 0}
+
+    def fake_get(path, params=None):
+        calls["n"] += 1
+        return {"data": []}
+
+    monkeypatch.setattr(api_client, "get", fake_get)
+    api_client._routes_cache = None
+    api_client._routes_cached_at = 0.0
+
+    api_client.list_routes()
+    api_client._routes_cached_at = time.monotonic() - (api_client._ROUTES_TTL_SECONDS + 1)
+    api_client.list_routes()
+    assert calls["n"] == 2  # refetched after TTL
+
+
+# ---------------------------------------------------------------------------
+# Rate limiter
+# ---------------------------------------------------------------------------
+
+def test_rate_limiter_blocks_over_limit():
+    from quantumlane_mcp.ratelimit import RateLimitMiddleware
+    mw = RateLimitMiddleware(app=None, limit=3, window_seconds=60)
+    results = [mw._allowed("1.2.3.4") for _ in range(5)]
+    assert results == [True, True, True, False, False]
+
+
+def test_rate_limiter_per_ip_independent():
+    from quantumlane_mcp.ratelimit import RateLimitMiddleware
+    mw = RateLimitMiddleware(app=None, limit=1, window_seconds=60)
+    assert mw._allowed("1.1.1.1") is True
+    assert mw._allowed("1.1.1.1") is False  # second from same IP blocked
+    assert mw._allowed("2.2.2.2") is True   # different IP unaffected
+
+
+def test_rate_limiter_window_resets():
+    import time
+    from quantumlane_mcp.ratelimit import RateLimitMiddleware
+    mw = RateLimitMiddleware(app=None, limit=2, window_seconds=60)
+    mw._buckets["3.3.3.3"] = (time.monotonic() - 61, 2)  # window elapsed, was at limit
+    assert mw._allowed("3.3.3.3") is True  # resets

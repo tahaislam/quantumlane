@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 
 import httpx
 
@@ -32,6 +33,18 @@ _http = httpx.Client(
     headers={"User-Agent": "quantumlane-mcp/0.1"},
 )
 
+# Route-catalog cache. The static GTFS (routes/stops/schedules) is reloaded ONCE
+# per day by the ingestion pipeline, so the route list is effectively static
+# between loads. Without a cache, resolve_route (called on every vehicles_on_route)
+# would re-fetch the whole catalog every time. TTL is 1 hour: comfortably shorter
+# than the daily reload (so the MCP is never more than an hour behind a new load),
+# but long enough to collapse per-call reads to a handful per day. Matching the TTL
+# to the data's real change rate (daily) — not caching live data, which is fetched
+# fresh every call.
+_ROUTES_TTL_SECONDS = 3600
+_routes_cache: list[dict] | None = None
+_routes_cached_at: float = 0.0
+
 
 def get(path: str, params: dict | None = None) -> dict:
     """GET a public API endpoint; return the parsed JSON envelope ({data, meta}).
@@ -45,8 +58,18 @@ def get(path: str, params: dict | None = None) -> dict:
 
 
 def list_routes() -> list[dict]:
-    """Return the full route catalog (the `data` list from /v1/routes)."""
-    return get("/v1/routes").get("data", [])
+    """Return the full route catalog (the `data` list from /v1/routes), cached 1h.
+
+    The catalog changes at most once a day (daily static-GTFS reload), so we cache
+    it for an hour rather than re-fetching on every resolve_route call.
+    """
+    global _routes_cache, _routes_cached_at
+    now = time.monotonic()
+    if _routes_cache is not None and (now - _routes_cached_at) < _ROUTES_TTL_SECONDS:
+        return _routes_cache
+    _routes_cache = get("/v1/routes").get("data", [])
+    _routes_cached_at = now
+    return _routes_cache
 
 
 def vehicles_for_route_id(route_id: str) -> list[dict]:
