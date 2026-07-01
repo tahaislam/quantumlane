@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Connect via MCP — QuantumLane</title>
+  <meta name="description" content="Connect Claude or ChatGPT to QuantumLane's public MCP server and ask about live Toronto transit in plain English." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚊</text></svg>" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <header class="border-b border-slate-200 bg-white">
+    <div class="max-w-5xl mx-auto px-6 py-4 flex justify-between items-center">
+      <a href="/" class="text-lg font-semibold tracking-tight">QuantumLane<span class="text-sky-600">.</span></a>
+      <nav class="flex gap-6 text-sm text-slate-600">
+        <a href="/freshness.html" class="hover:text-slate-900">Freshness</a>
+        <a href="/explore.html" class="hover:text-slate-900">Explore</a>
+        <a href="/architecture.html" class="hover:text-slate-900">Architecture</a>
+        <a href="/mcp.html" class="text-slate-900 font-medium">Connect</a>
+        <a href="https://github.com/tahaislam/quantumlane" class="hover:text-slate-900">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-6 py-12">
+    <section class="mb-12">
+      <h1 class="text-4xl font-bold tracking-tight mb-4">Connect to QuantumLane via MCP</h1>
+      <p class="text-lg text-slate-600">
+        QuantumLane runs a remote Model Context Protocol (MCP) server, so you can ask
+        Claude or ChatGPT about live Toronto transit in plain English — and it answers
+        from real GTFS data instead of pointing you at a tracker.
+      </p>
+    </section>
+
+    <section class="mb-12">
+      <!-- YouTube embed. Replace RX15m-muWH4 with the id from your uploaded video's URL. -->
+      <div class="w-full rounded-lg overflow-hidden border border-slate-200" style="aspect-ratio:16/9;">
+        <iframe
+          class="w-full h-full"
+          src="https://www.youtube.com/embed/RX15m-muWH4"
+          title="QuantumLane MCP demo — Claude answering live transit questions with and without the MCP server"
+          frameborder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          referrerpolicy="strict-origin-when-cross-origin"
+          allowfullscreen></iframe>
+      </div>
+      <p class="text-sm text-slate-500 mt-3">
+        80-second demo: the same three questions asked with and without the MCP connected.
+        Without it, the assistant can only answer from static data it already has; with it,
+        it answers the live questions from QuantumLane's real-time feed.
+      </p>
+    </section>
+
+    <section class="mb-12">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-3">The server URL</h2>
+      <p class="text-slate-600 mb-3">Add this as a custom connector in your AI client:</p>
+      <div class="bg-white border border-slate-200 rounded-lg px-4 py-3 font-mono text-sm break-all mb-3">
+        https://quantumlane.io/mcp
+      </div>
+      <p class="text-sm text-slate-600">
+        No account, no API key, no OAuth — it's a public, read-only server. Your client
+        connects to it over the internet, so nothing is installed on your machine.
+      </p>
+    </section>
+
+    <section class="mb-12">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-4">What it can do</h2>
+      <div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-slate-500 border-b border-slate-200">
+              <th class="text-left font-semibold px-4 py-3">Tool</th>
+              <th class="text-left font-semibold px-4 py-3">Answers questions like</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="border-b border-slate-100">
+              <td class="px-4 py-3 align-top"><code class="text-sky-700 whitespace-nowrap">list_routes</code></td>
+              <td class="px-4 py-3 text-slate-600">"What TTC routes exist?" — every route, by number and name.</td>
+            </tr>
+            <tr class="border-b border-slate-100">
+              <td class="px-4 py-3 align-top"><code class="text-sky-700 whitespace-nowrap">vehicles_on_route</code></td>
+              <td class="px-4 py-3 text-slate-600">"Where is the 504 right now?" / "How many King streetcars are out?" — live positions, ~1–2 minutes old.</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 align-top"><code class="text-sky-700 whitespace-nowrap">nearest_stops</code></td>
+              <td class="px-4 py-3 text-slate-600">"What stops are near the CN Tower?" — closest stops to any coordinate, via a PostGIS spatial query.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="border-l-3 border-sky-500 bg-sky-50 rounded-r-lg px-4 py-3 mt-4 text-sm text-slate-600" style="border-left-width:3px;">
+        Tip: refer to a route the way a rider would — "504", "the King car", "Dufferin bus".
+        The server resolves that to the internal route ID for you. Route numbers ("504")
+        resolve most reliably.
+      </div>
+    </section>
+
+    <section class="mb-12">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-4">Add it in Claude</h2>
+      <ol class="list-decimal list-inside space-y-2 text-slate-600 marker:text-slate-400">
+        <li>Open <strong class="text-slate-900">Settings → Connectors</strong> (on claude.ai or Claude Desktop).</li>
+        <li>Click <strong class="text-slate-900">Add custom connector</strong>.</li>
+        <li>Paste <code class="text-sky-700">https://quantumlane.io/mcp</code> and click <strong class="text-slate-900">Add</strong>.</li>
+        <li>In a chat, open the <strong class="text-slate-900">+</strong> / tools menu and toggle on <strong class="text-slate-900">QuantumLane</strong>.</li>
+      </ol>
+      <p class="text-sm text-slate-500 mt-3">
+        Custom connectors are a beta feature; availability by plan and the exact menu
+        labels change over time — check Claude's current connector settings if a step differs.
+      </p>
+    </section>
+
+    <section class="mb-12">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-4">Add it in ChatGPT</h2>
+      <p class="text-slate-600 mb-2">
+        Remote MCP servers are supported in ChatGPT's Developer Mode on paid plans. Enable
+        Developer Mode in settings, then add <code class="text-sky-700">https://quantumlane.io/mcp</code>
+        as a connector.
+      </p>
+      <p class="text-sm text-slate-500">
+        Availability and exact steps shift as the feature evolves — check OpenAI's current
+        connector docs if the menu differs.
+      </p>
+    </section>
+
+    <section class="mb-12">
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-4">Try it</h2>
+      <p class="text-slate-600 mb-3">Once connected, ask:</p>
+      <ul class="space-y-2 text-slate-600">
+        <li class="bg-white border border-slate-200 rounded-lg px-4 py-2">"Where are the King streetcars right now?"</li>
+        <li class="bg-white border border-slate-200 rounded-lg px-4 py-2">"What TTC stops are near the CN Tower?"</li>
+        <li class="bg-white border border-slate-200 rounded-lg px-4 py-2">"How many vehicles are running on the 504 right now?"</li>
+      </ul>
+    </section>
+
+    <div class="border-l-3 border-amber-500 bg-amber-50 rounded-r-lg px-4 py-3 text-sm text-slate-600" style="border-left-width:3px;">
+      <strong class="text-slate-900">Heads-up:</strong> this is a personal project on a single small
+      server. It's read-only and safe to connect, but it may go down for maintenance and carries no
+      uptime guarantee. Live positions are bounded by feed cadence — minute-fresh, not second-by-second.
+    </div>
+  </main>
+
+  <footer class="border-t border-slate-200 bg-white mt-8">
+    <div class="max-w-5xl mx-auto px-6 py-6 flex justify-between text-xs text-slate-500">
+      <span>QuantumLane v0.4 · MIT · Built with Python, FastMCP, Postgres/PostGIS, Dagster, S3</span>
+      <span>Built by <a href="https://www.linkedin.com/in/taha-islam" class="hover:text-slate-700">Islam Taha</a></span>
+    </div>
+  </footer>
+</body>
+</html>
