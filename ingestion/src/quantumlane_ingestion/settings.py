@@ -8,6 +8,7 @@ Why pydantic-settings:
 Env var conventions:
     All vars are prefixed QL_ to namespace cleanly. See .env.example for the full list.
 """
+
 from __future__ import annotations
 
 from pydantic import Field
@@ -79,6 +80,15 @@ class Settings(BaseSettings):
     s3_region: str = Field(
         default="us-east-1",
         description="AWS region of the cold-tier bucket (QL_S3_REGION).",
+    )
+
+    # --- Alert classifier (LLM) ---
+    # NOTE: the API key is deliberately NOT a QL_-prefixed setting. The Anthropic SDK
+    # reads ANTHROPIC_API_KEY straight from the environment; if it's unset the
+    # ttc_alert_classifications asset skips gracefully and ingestion is unaffected.
+    classifier_model: str = Field(
+        default="claude-haiku-4-5",
+        description="Anthropic model id used to classify service alerts (QL_CLASSIFIER_MODEL).",
     )
 
     # --- Operational ---

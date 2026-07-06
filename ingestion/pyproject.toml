@@ -16,6 +16,7 @@ dependencies = [
     "pandas>=2.2.0",
     "pyarrow>=17.0.0",
     "boto3>=1.35.0",                   # for AWS S3 cold tier
+    "anthropic>=0.69.0",               # service-alert classifier (structured outputs)
     "structlog>=24.4.0",
     "pydantic>=2.9.0",
     "pydantic-settings>=2.5.0",

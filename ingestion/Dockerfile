@@ -38,6 +38,7 @@ RUN pip install --prefix=/install \
     "pandas>=2.2.0" \
     "pyarrow>=17.0.0" \
     "boto3>=1.35.0" \
+    "anthropic>=0.69.0" \
     "structlog>=24.4.0" \
     "pydantic>=2.9.0" \
     "pydantic-settings>=2.5.0"
