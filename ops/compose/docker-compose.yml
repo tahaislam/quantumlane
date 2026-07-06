@@ -63,6 +63,10 @@ services:
       QL_TTC_TRIP_UPDATES_URL: ${QL_TTC_TRIP_UPDATES_URL:-https://bustime.ttc.ca/gtfsrt/trips}
       QL_TTC_SERVICE_ALERTS_URL: ${QL_TTC_SERVICE_ALERTS_URL:-https://bustime.ttc.ca/gtfsrt/alerts}
       QL_HTTP_USER_AGENT: ${QL_HTTP_USER_AGENT}
+      # Alert classifier: key is read by the Anthropic SDK directly (no QL_ prefix).
+      # Empty/unset key means the classification asset skips gracefully.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      QL_CLASSIFIER_MODEL: ${QL_CLASSIFIER_MODEL:-claude-haiku-4-5}
       QL_S3_ACCESS_KEY_ID: ${QL_S3_ACCESS_KEY_ID}
       QL_S3_SECRET_ACCESS_KEY: ${QL_S3_SECRET_ACCESS_KEY}
       QL_S3_BUCKET: ${QL_S3_BUCKET}
