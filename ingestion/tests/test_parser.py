@@ -5,6 +5,7 @@ The parser is pure functions — bytes in, dicts out — so it's the easiest pie
 thoroughly. We construct synthetic FeedMessage protobufs in-process rather than fixtures
 so the tests don't depend on captured TTC payloads (which would go stale).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -68,9 +69,9 @@ def _build_alert_feed() -> gtfs_realtime_pb2.FeedMessage:
     e = feed.entity.add()
     e.id = "alert-001"
     a = e.alert
-    a.cause = 9          # CONSTRUCTION
-    a.effect = 4         # DETOUR
-    a.severity_level = 2 # WARNING
+    a.cause = 9  # CONSTRUCTION
+    a.effect = 4  # DETOUR
+    a.severity_level = 2  # WARNING
     t = a.header_text.translation.add()
     t.text = "504 King: detour at Spadina"
     t.language = "en"

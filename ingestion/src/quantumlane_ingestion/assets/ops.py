@@ -4,6 +4,7 @@ Operational assets: freshness checks, partition maintenance, parquet exports.
 These are the immune system of the platform. They run on schedules independent of
 the ingestion assets and write to the ops.* schema.
 """
+
 from __future__ import annotations
 
 import os
@@ -13,7 +14,7 @@ from datetime import UTC, date, datetime, timedelta
 import pyarrow as pa
 import pyarrow.parquet as pq
 import structlog
-from dagster import MetadataValue, asset, DailyPartitionsDefinition
+from dagster import DailyPartitionsDefinition, MetadataValue, asset
 
 from quantumlane_ingestion.resources import PostgresResource, S3Resource
 
@@ -25,9 +26,13 @@ log = structlog.get_logger(__name__)
 # Tweak with care — looser thresholds hide real outages; tighter ones cry wolf.
 FRESHNESS_THRESHOLDS = {
     # feed_key: (healthy_max_lag_s, lagging_max_lag_s, stale_max_lag_s)
-    "ttc.vehicle_positions": (60, 180, 600),     # 1 min healthy, 3 min lagging, 10 min stale, then down
-    "ttc.trip_updates":      (60, 180, 600),
-    "ttc.service_alerts":    (600, 1800, 3600),  # alerts can legitimately go an hour without changes
+    "ttc.vehicle_positions": (
+        60,
+        180,
+        600,
+    ),  # 1 min healthy, 3 min lagging, 10 min stale, then down
+    "ttc.trip_updates": (60, 180, 600),
+    "ttc.service_alerts": (600, 1800, 3600),  # alerts can legitimately go an hour without changes
 }
 
 # Cold-tier export config: which realtime tables get archived, and the timestamp
@@ -149,7 +154,6 @@ def daily_partition_maintenance(
     """
     today = date.today()
     created = []
-    detached = []
 
     with postgres.connection() as conn:
         with conn.cursor() as cur:

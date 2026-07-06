@@ -4,6 +4,7 @@ Dagster Definitions — the entry point that wires assets, resources, and schedu
 This is what `dagster dev` and the dagster-webserver/daemon containers load.
 The module path is referenced in pyproject.toml under [tool.dagster].
 """
+
 from __future__ import annotations
 
 from dagster import (
@@ -11,9 +12,9 @@ from dagster import (
     DefaultScheduleStatus,
     Definitions,
     ScheduleDefinition,
+    build_schedule_from_partitioned_job,
     define_asset_job,
     load_assets_from_modules,
-    build_schedule_from_partitioned_job,
 )
 
 from quantumlane_ingestion.assets import ops as ops_assets

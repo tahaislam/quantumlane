@@ -7,6 +7,7 @@ Design notes:
     - Field-population signatures are computed here too (used for schema-drift detection).
     - GTFS-RT optional fields are *frequently* not populated; defensive .HasField checks throughout.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -75,7 +76,9 @@ def vehicle_position_rows(
                 "vehicle_id": vehicle.id if vehicle and vehicle.HasField("id") else None,
                 "trip_id": trip.trip_id if trip and trip.HasField("trip_id") else None,
                 "route_id": trip.route_id if trip and trip.HasField("route_id") else None,
-                "direction_id": trip.direction_id if trip and trip.HasField("direction_id") else None,
+                "direction_id": trip.direction_id
+                if trip and trip.HasField("direction_id")
+                else None,
                 "longitude": pos.longitude,
                 "latitude": pos.latitude,
                 "bearing": pos.bearing if pos.HasField("bearing") else None,
@@ -132,15 +135,21 @@ def trip_update_rows(
                     "trip_id": trip.trip_id if trip.HasField("trip_id") else None,
                     "route_id": trip.route_id if trip.HasField("route_id") else None,
                     "direction_id": trip.direction_id if trip.HasField("direction_id") else None,
-                    "start_date": _parse_yyyymmdd(trip.start_date) if trip.HasField("start_date") else None,
+                    "start_date": _parse_yyyymmdd(trip.start_date)
+                    if trip.HasField("start_date")
+                    else None,
                     "schedule_relationship": (
-                        trip.schedule_relationship if trip.HasField("schedule_relationship") else None
+                        trip.schedule_relationship
+                        if trip.HasField("schedule_relationship")
+                        else None
                     ),
                     "stop_sequence": stu.stop_sequence if stu.HasField("stop_sequence") else None,
                     "stop_id": stu.stop_id if stu.HasField("stop_id") else None,
                     "arrival_time": arrival_dt,
                     "arrival_delay_s": (
-                        stu.arrival.delay if stu.HasField("arrival") and stu.arrival.HasField("delay") else None
+                        stu.arrival.delay
+                        if stu.HasField("arrival") and stu.arrival.HasField("delay")
+                        else None
                     ),
                     "departure_time": departure_dt,
                     "departure_delay_s": (
@@ -176,7 +185,11 @@ def service_alert_rows(
         affected_routes = sorted({s.route_id for s in a.informed_entity if s.HasField("route_id")})
         affected_stops = sorted({s.stop_id for s in a.informed_entity if s.HasField("stop_id")})
         affected_trips = sorted(
-            {s.trip.trip_id for s in a.informed_entity if s.HasField("trip") and s.trip.HasField("trip_id")}
+            {
+                s.trip.trip_id
+                for s in a.informed_entity
+                if s.HasField("trip") and s.trip.HasField("trip_id")
+            }
         )
 
         # active_period is repeated; v0.1 takes the first window. v0.2 may model multi-window alerts.

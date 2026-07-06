@@ -4,6 +4,7 @@ Smoke tests for the API.
 These hit endpoints that don't depend on populated data — health and freshness
 work even on an empty DB. Full integration tests with seeded data are deferred to v0.2.
 """
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient

@@ -6,6 +6,7 @@ Retry policy:
     Transient errors (timeout, connection error, 5xx) → up to 3 attempts with
     exponential backoff. 4xx fails fast — those are bugs in our request, not flakes.
 """
+
 from __future__ import annotations
 
 import httpx

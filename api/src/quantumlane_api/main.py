@@ -7,6 +7,7 @@ This is what the website calls and what external users can hit directly.
 Run locally:
     uvicorn quantumlane_api.main:app --reload --port 8000
 """
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -36,7 +37,9 @@ from quantumlane_api.settings import get_settings
 
 log = structlog.get_logger(__name__)
 settings = get_settings()
-limiter = Limiter(key_func=get_remote_address, default_limits=[f"{settings.rate_limit_per_minute}/minute"])
+limiter = Limiter(
+    key_func=get_remote_address, default_limits=[f"{settings.rate_limit_per_minute}/minute"]
+)
 
 
 @asynccontextmanager
@@ -79,6 +82,7 @@ def _meta(data_age_seconds: int | None = None) -> Meta:
 # Health / readiness — no rate limit, no envelope
 # -----------------------------------------------------------------------------
 
+
 @app.api_route("/health", methods=["GET", "HEAD"], tags=["ops"], summary="Liveness probe")
 def health() -> dict:
     return {"status": "ok"}
@@ -88,24 +92,32 @@ def health() -> dict:
 def ready() -> JSONResponse:
     if db.ping():
         return JSONResponse(content={"status": "ready"}, status_code=status.HTTP_200_OK)
-    return JSONResponse(content={"status": "db_unreachable"}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+    return JSONResponse(
+        content={"status": "db_unreachable"}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE
+    )
 
 
 # -----------------------------------------------------------------------------
 # v1 endpoints
 # -----------------------------------------------------------------------------
 
+
 @app.get("/v1/agencies", tags=["catalog"], response_model=Envelope[list[Agency]])
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 def list_agencies(request: Request) -> Envelope[list[Agency]]:
     """List ingested agencies. v0.1: TTC only."""
     rows = db.fetch_all(
-        "SELECT agency_id, agency_name AS name, agency_timezone AS timezone "
-        "FROM static_gtfs.agency"
+        "SELECT agency_id, agency_name AS name, agency_timezone AS timezone FROM static_gtfs.agency"
     )
     # If static GTFS hasn't loaded yet, still return TTC as a known agency.
     if not rows:
-        rows = [{"agency_id": "ttc", "name": "Toronto Transit Commission", "timezone": "America/Toronto"}]
+        rows = [
+            {
+                "agency_id": "ttc",
+                "name": "Toronto Transit Commission",
+                "timezone": "America/Toronto",
+            }
+        ]
     return Envelope(data=[Agency(**r) for r in rows], meta=_meta())
 
 
@@ -130,7 +142,11 @@ def freshness(request: Request) -> Envelope[list[FeedFreshness]]:
     return Envelope(data=items, meta=_meta())
 
 
-@app.get("/v1/vehicle-positions/latest", tags=["realtime"], response_model=Envelope[list[VehiclePosition]])
+@app.get(
+    "/v1/vehicle-positions/latest",
+    tags=["realtime"],
+    response_model=Envelope[list[VehiclePosition]],
+)
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 def vehicle_positions_latest(
     request: Request,
@@ -217,7 +233,11 @@ def stops_nearby(
     return Envelope(data=[Stop(**r) for r in rows], meta=_meta())
 
 
-@app.get("/v1/routes/{route_id}/vehicles", tags=["realtime"], response_model=Envelope[list[VehiclePosition]])
+@app.get(
+    "/v1/routes/{route_id}/vehicles",
+    tags=["realtime"],
+    response_model=Envelope[list[VehiclePosition]],
+)
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 def vehicles_on_route(request: Request, route_id: str) -> Envelope[list[VehiclePosition]]:
     """Convenience wrapper over /v1/vehicle-positions/latest with a route filter."""
