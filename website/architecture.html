@@ -91,13 +91,30 @@
       which then feeds both the live gauge and the historical aggregate from a single source.
     </p>
 
+    <h2>MCP server</h2>
+    <p>
+      QuantumLane runs a public <strong>Model Context Protocol server</strong>, so LLM clients —
+      Claude and ChatGPT — can answer live transit questions in plain English: vehicles on a route
+      (with rider-language → <code>route_id</code> resolution), nearest stops via PostGIS KNN, and
+      route lookup. It deliberately wraps the deployed public API rather than the database — no
+      separate data path, no DB credentials in the MCP layer, one source of truth.
+    </p>
+    <p>
+      Guardrails are right-sized for a small shared box: a per-IP rate limit and a route-catalog
+      cache whose TTL matches the catalog's actual change cadence (the daily static-GTFS reload) —
+      not auth or quotas, which the access pattern doesn't justify. Today's tools are live and
+      spatial; the analytical tools ("how reliable is the 504 <em>usually</em>") arrive with the
+      OLAP layer below. <a href="/connect.html">How to connect →</a>
+    </p>
+
     <h2>What's in v0.4</h2>
     <ul>
       <li>TTC GTFS-RT ingestion: vehicle positions and trip updates every minute, service alerts every 5 minutes.</li>
       <li>TTC static GTFS daily full-replace (04:00 Toronto), with the large <code>stop_times</code> file streamed via <code>COPY</code>.</li>
       <li>PostgreSQL 16 + PostGIS hot tier; daily-partitioned real-time tables with a 3-day retention window and daily partition maintenance.</li>
       <li>Daily Parquet export to S3 cold storage, partitioned by UTC day with Hive-style keys.</li>
-      <li>FastAPI public read-only API with rate limiting.</li>
+      <li>FastAPI public read-only API with rate limiting, including a nearest-stops endpoint (PostGIS KNN, distances in metres).</li>
+      <li>Public MCP server over the API — three tools, remote streamable HTTP, per-IP rate limiting, route-catalog caching — with a <a href="/connect.html">connect guide</a> and demo video.</li>
       <li>Per-feed freshness telemetry, refreshed every minute and surfaced on this site.</li>
       <li>Schema-drift detection via field-population signatures.</li>
       <li>Dagster run monitoring for stuck/zombie runs.</li>
@@ -105,12 +122,11 @@
 
     <h2>Planned</h2>
     <ul>
-      <li><strong>MCP server</strong> — a Model Context Protocol server over the public API, letting LLM
-        clients (Claude, ChatGPT) answer live transit questions: vehicles on a route (with human-name →
-        <code>route_id</code> resolution), nearest stops via PostGIS, and route lookup. Wraps the deployed
-        HTTP API; remote-hosted and publicly accessible.</li>
       <li><strong>Historical reliability</strong> — the daily OLAP aggregation described above, once the
-        stop-level finalize path is built out.</li>
+        stop-level finalize path is built out. This is also what unlocks the analytical MCP tools —
+        the questions a live-feed wrapper structurally can't answer.</li>
+      <li><strong>Iceberg cold tier</strong> — PySpark writing the expiring hot partitions to Iceberg on S3,
+        restoring the archive-then-drop ordering the retention job was designed for.</li>
       <li><strong>Other agencies</strong> — GO Transit, MiWay, and other GTA feeds, with the schema-heterogeneity story.</li>
     </ul>
 
