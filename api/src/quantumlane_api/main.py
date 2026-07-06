@@ -21,7 +21,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
-from quantumlane_api import db
+from quantumlane_api import db, queries
 from quantumlane_api.schemas import (
     Agency,
     DailyStat,
@@ -30,6 +30,7 @@ from quantumlane_api.schemas import (
     IngestionRun,
     Meta,
     Route,
+    ServiceAlert,
     Stop,
     VehiclePosition,
 )
@@ -242,6 +243,23 @@ def stops_nearby(
 def vehicles_on_route(request: Request, route_id: str) -> Envelope[list[VehiclePosition]]:
     """Convenience wrapper over /v1/vehicle-positions/latest with a route filter."""
     return vehicle_positions_latest(request=request, route_id=route_id, limit=500)
+
+
+@app.get("/v1/alerts", tags=["realtime"], response_model=Envelope[list[ServiceAlert]])
+@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
+def list_alerts(request: Request, limit: int = 100) -> Envelope[list[ServiceAlert]]:
+    """
+    Service alerts with LLM-inferred cause/severity, newest-seen first.
+
+    Native GTFS-RT fields are top-level; inferred values sit under `inferred` (null
+    when an alert has no classification yet) so the provenance is unmistakable.
+    The query lives in the shared data-access layer (quantumlane_api.queries) —
+    other consumers import the same function rather than rewriting it.
+    """
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=400, detail="limit must be 1..500")
+    rows = queries.list_alerts_with_classifications(limit=limit)
+    return Envelope(data=[ServiceAlert(**row) for row in rows], meta=_meta())
 
 
 @app.get("/v1/stats/daily", tags=["ops"], response_model=Envelope[list[DailyStat]])

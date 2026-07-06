@@ -86,3 +86,55 @@ class Stop(BaseModel):
     latitude: float
     longitude: float
     distance_m: float | None = None
+
+
+class InferredClassification(BaseModel):
+    """
+    LLM-inferred fields — NOT from the GTFS-RT feed.
+
+    Produced by the alert classifier (see realtime.service_alert_classifications)
+    because the TTC rarely populates the native cause and never populates
+    severity_level. Kept in a nested object so inferred values can't be mistaken
+    for native feed data.
+    """
+
+    # protected_namespaces=(): allow the field name "model" (pydantic reserves model_*).
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    cause: str = Field(description="GTFS-RT Cause label inferred from the alert text.")
+    cause_detail: str | None = Field(
+        description="Short phrase from the alert naming the concrete cause, if any."
+    )
+    severity: str = Field(description="GTFS-RT SeverityLevel label inferred from the alert text.")
+    model: str = Field(description="Model id that produced the inference.")
+    prompt_version: str = Field(description="Classifier prompt version at inference time.")
+    classified_at: datetime
+
+
+class ServiceAlert(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    agency_id: str
+    alert_id: str
+    header_text: str | None
+    description_text: str | None
+    cause: int | None = Field(
+        description="Native GTFS-RT Cause enum code; rarely populated by the TTC."
+    )
+    effect: int | None = Field(description="Native GTFS-RT Effect enum code.")
+    severity_level: int | None = Field(
+        description="Native GTFS-RT SeverityLevel enum code; never populated by the TTC."
+    )
+    affected_routes: list[str] | None
+    affected_stops: list[str] | None
+    active_period_start: datetime | None
+    active_period_end: datetime | None
+    first_seen_at: datetime
+    last_seen_at: datetime
+    inferred: InferredClassification | None = Field(
+        default=None,
+        description=(
+            "LLM-inferred classification of the alert text; null when not yet classified. "
+            "These values are inferred, not part of the GTFS-RT feed."
+        ),
+    )
