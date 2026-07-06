@@ -58,8 +58,11 @@ ttc_realtime_30s_job = define_asset_job(
 
 ttc_alerts_5m_job = define_asset_job(
     name="ttc_alerts_5m_job",
-    selection=AssetSelection.assets("ttc_service_alerts"),
-    description="Service alerts; lower cadence is sufficient.",
+    selection=AssetSelection.assets("ttc_service_alerts", "ttc_alert_classifications"),
+    description=(
+        "Service alerts plus their LLM classification; lower cadence is sufficient. "
+        "Classification runs downstream of ingestion and can never block it."
+    ),
 )
 
 freshness_1m_job = define_asset_job(

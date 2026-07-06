@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import csv
 import io
+import os
 import zipfile
 from datetime import UTC, date, datetime
 from typing import Any
@@ -38,6 +39,7 @@ from dagster import (
     RetryPolicy,
     asset,
 )
+from psycopg.types.json import Jsonb
 
 # NOTE: Asset `context` parameters are deliberately left unannotated.
 # Under `from __future__ import annotations` (used throughout this codebase for modern
@@ -46,6 +48,15 @@ from dagster import (
 # The simplest robust fix is to omit the annotation on `context` specifically.
 # Resources passed as keyword args (gtfs_rt, postgres) are annotated normally because
 # Dagster resolves those via resource_defs keys, not via type hints.
+from quantumlane_ingestion.classifier import (
+    AlertClassification,
+    AlertForClassification,
+    AnthropicProvider,
+    ClassificationProvider,
+    classify_alerts,
+    normalize_alert_text,
+    select_unclassified,
+)
 from quantumlane_ingestion.parser import (
     field_signature,
     parse_feed,
@@ -329,6 +340,168 @@ def _upsert_service_alerts(conn: psycopg.Connection, rows: list[dict[str, Any]])
             active_period_end = EXCLUDED.active_period_end,
             raw_payload_hash = EXCLUDED.raw_payload_hash
     """
+    with conn.cursor() as cur:
+        cur.executemany(sql, rows)
+
+
+# -----------------------------------------------------------------------------
+# Alert Classifications (LLM-inferred cause/severity, cached by text hash)
+# -----------------------------------------------------------------------------
+
+
+@asset(
+    name="ttc_alert_classifications",
+    group_name="ttc_realtime",
+    compute_kind="python",
+    deps=[ttc_service_alerts],
+    retry_policy=ASSET_RETRY,
+    description=(
+        "LLM-inferred cause/severity for TTC service alerts. Classifies only alerts whose "
+        "text has no classification row yet (hash cache); provider failures never fail "
+        "this asset or block ingestion."
+    ),
+)
+def ttc_alert_classifications(
+    context,
+    postgres: PostgresResource,
+) -> None:
+    """
+    Downstream of ttc_service_alerts on the same 5-minute job.
+
+    Each run: select alerts whose (agency_id, alert_id, input_hash) has no row in
+    realtime.service_alert_classifications, classify those via the classifier seam,
+    insert the validated results. Inferred values are NEVER written back into
+    realtime.service_alerts (provenance rule) — consumers join at read time.
+
+    Failure posture: a missing API key, a provider outage, or a bad model response
+    leaves those alerts unclassified (they retry next run) and the asset still
+    SUCCEEDS — a provider problem must never fail or block ingestion. Only DB errors
+    raise (and hit ASSET_RETRY).
+    """
+    settings = get_settings()
+
+    alert_rows = postgres.fetch_all(
+        "SELECT agency_id, alert_id, header_text, description_text "
+        "FROM realtime.service_alerts WHERE agency_id = %s",
+        (AGENCY_ID,),
+    )
+    alerts = [
+        AlertForClassification(
+            agency_id=row[0], alert_id=row[1], header_text=row[2], description_text=row[3]
+        )
+        for row in alert_rows
+        # No text, nothing to classify (live TTC alerts always carry header_text).
+        if normalize_alert_text(row[2], row[3])
+    ]
+
+    existing_rows = postgres.fetch_all(
+        "SELECT agency_id, alert_id, input_hash "
+        "FROM realtime.service_alert_classifications WHERE agency_id = %s",
+        (AGENCY_ID,),
+    )
+    existing = {(row[0], row[1], row[2]) for row in existing_rows}
+    pending = select_unclassified(alerts, existing)
+    cache_hits = len(alerts) - len(pending)
+
+    if not pending:
+        context.add_output_metadata(
+            {
+                "alerts_total": len(alerts),
+                "cache_hits": cache_hits,
+                "api_calls": 0,
+                "classified": 0,
+                "failed": 0,
+            }
+        )
+        return
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        context.log.warning(
+            f"ANTHROPIC_API_KEY is not set; {len(pending)} alert(s) stay unclassified "
+            "and will be retried next run."
+        )
+        context.add_output_metadata(
+            {
+                "alerts_total": len(alerts),
+                "cache_hits": cache_hits,
+                "api_calls": 0,
+                "classified": 0,
+                "failed": len(pending),
+                "status": MetadataValue.text("skipped_no_api_key"),
+            }
+        )
+        return
+
+    # Per-alert call/validation errors are contained inside classify_alerts; this
+    # try only guards provider construction (bad key format, SDK config errors).
+    try:
+        provider: ClassificationProvider = AnthropicProvider(model=settings.classifier_model)
+        classifications = classify_alerts(pending, provider=provider)
+    except Exception:
+        log.exception("classifier_provider_unavailable")
+        context.add_output_metadata(
+            {
+                "alerts_total": len(alerts),
+                "cache_hits": cache_hits,
+                "api_calls": 0,
+                "classified": 0,
+                "failed": len(pending),
+                "status": MetadataValue.text("skipped_provider_error"),
+            }
+        )
+        return
+
+    if classifications:
+        with postgres.connection() as conn:
+            _insert_alert_classifications(conn, classifications)
+            conn.commit()
+
+    context.add_output_metadata(
+        {
+            "alerts_total": len(alerts),
+            "cache_hits": cache_hits,
+            "api_calls": len(pending),
+            "classified": len(classifications),
+            "failed": len(pending) - len(classifications),
+            "model": MetadataValue.text(settings.classifier_model),
+        }
+    )
+
+
+def _insert_alert_classifications(
+    conn: psycopg.Connection, classifications: list[AlertClassification]
+) -> None:
+    """
+    Append-only insert; classified_at defaults to NOW() in the DB. ON CONFLICT DO
+    NOTHING keeps replayed runs idempotent on the (agency_id, alert_id, input_hash)
+    cache key. Values were already validated in Python; the CHECKs are the backstop.
+    """
+    sql = """
+        INSERT INTO realtime.service_alert_classifications (
+            agency_id, alert_id, input_hash,
+            cause_inferred, cause_detail, severity_inferred,
+            model, prompt_version, raw_response
+        ) VALUES (
+            %(agency_id)s, %(alert_id)s, %(input_hash)s,
+            %(cause_inferred)s, %(cause_detail)s, %(severity_inferred)s,
+            %(model)s, %(prompt_version)s, %(raw_response)s
+        )
+        ON CONFLICT (agency_id, alert_id, input_hash) DO NOTHING
+    """
+    rows = [
+        {
+            "agency_id": c.agency_id,
+            "alert_id": c.alert_id,
+            "input_hash": c.input_hash,
+            "cause_inferred": c.cause_inferred,
+            "cause_detail": c.cause_detail,
+            "severity_inferred": c.severity_inferred,
+            "model": c.model,
+            "prompt_version": c.prompt_version,
+            "raw_response": Jsonb(c.raw_response),
+        }
+        for c in classifications
+    ]
     with conn.cursor() as cur:
         cur.executemany(sql, rows)
 
