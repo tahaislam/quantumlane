@@ -2,6 +2,8 @@
 
 A single-box data platform for public transit data in the Greater Toronto Area.
 
+*Last updated: 2026-08-14*
+
 ---
 
 ## 1. Scope
@@ -142,8 +144,7 @@ Notes on the two assets that earn their complexity:
 static_gtfs.*  — daily full-replace of TTC static GTFS (routes, stops, trips, stop_times, calendar)
 realtime.*     — append-only event tables, partitioned by day
 ops.*          — pipeline metadata: freshness, runs, failures, schema versions
-olap.*         — OLAP aggregates (planned; populated by the v0.3 lakehouse arc — supersedes the
-                 earlier `analytics.*` placeholder naming)
+olap.*         — OLAP aggregates (planned; populated by the v0.3 lakehouse arc — supersedes the earlier `analytics.*` placeholder naming)
 ```
 
 **Time zones:**
@@ -168,7 +169,7 @@ created for the next 7 UTC days.
 
 ### 4.3 API (`/api`)
 
-**Stack:** FastAPI, Pydantic v2, SQLAlchemy 2.x (sync), uvicorn.
+**Stack:** FastAPI, Pydantic v2, psycopg 3 (sync connection pool — queries are short and FastAPI's threadpool carries the concurrency; async is deliberately deferred until profiling shows the threadpool is the bottleneck), uvicorn.
 
 **Endpoints (current):**
 
@@ -255,7 +256,162 @@ Analytical tools ("how reliable is the 504 usually", headway comparisons) are th
 
 ---
 
-## 5. Roadmap
+## 5. Target state: how the tiers will interact
+
+> **Status: target state, not current state.** Everything in this section is design intent for the
+> v0.3 lakehouse arc. What exists today is the operational hot tier (minus `realtime.stop_delays`)
+> and the S3 Parquet cold tier. The `olap.*` schema, the aggregation path, and the loader are not
+> built. Decided points are marked decided; open questions are listed in §5.4.
+
+The business process being modeled is transit service delivery — vehicles executing scheduled
+trips, observed in real time. That one process generates two distinct query workloads:
+operational ("where is the 504 right now") and analytical ("how reliable is the 504 typically"),
+and the entire target state follows from serving each workload at its own grain and tier.
+
+```
+        OLTP — hot tier (Postgres)                    OLAP — serving tier (Postgres olap.*)
+┌─────────────────────────────────────────┐    ┌─────────────────────────────────────────┐
+│ realtime.vehicle_positions              │    │ olap.stop_headway_distribution          │
+│   transaction fact · grain:             │    │   periodic snapshot · grain:            │
+│   vehicle × poll · 3-day retention      │    │   stop × direction × UTC day            │
+│                                         │    │                                         │
+│ realtime.trip_updates                   │    │ olap.route_reliability_daily            │
+│   transaction fact · grain: predicted   │    │   periodic snapshot · grain:            │
+│   stop event × poll · 3-day retention   │    │   route × UTC day · aggregates          │
+│                                         │    │   finalized stop_delays (ADR-017)       │
+│ realtime.stop_delays        (P2.15)     │    └───────────▲─────────────────────────────┘
+│   accumulating-snapshot fact · grain:   │                │ idempotent per-day loader
+│   trip × stop_sequence · upserted per   │                │ (delete day, then insert)
+│   poll, finalized on arrival            │                │
+│                                         │      nightly: on-box DuckDB over the day
+│ static_gtfs.* + olap.dim_date           │      (read source: open — see §5.4)
+│   conformed dimensions · SCD Type 1     │      backfill: ad-hoc Spark (local, manual)
+│   history lives in the facts            │      → S3 olap_staging/ → same loader
+└──────────────┬──────────────────────────┘                │
+               │ nightly archive                           │
+               │ (verify write, THEN drop)                 │
+       ┌───────▼──────────────────────┐                    │
+       │ S3 cold tier                 │────────────────────┘
+       │ zstd Parquet → Iceberg       │    reads day partitions
+       │ immutable event history,     │
+       │ original grain preserved     │
+       └──────────────────────────────┘
+```
+
+### 5.1 The fact tables and their types
+
+#### 5.1.1 Operational (hot-tier) facts
+
+The two event tables live in the hot Postgres tier, partitioned by day, with 3-day retention;
+each completed UTC day is archived to the S3 cold tier before its partition is dropped.
+
+- **`realtime.vehicle_positions`** is a **transaction fact table**: one row per **vehicle per
+  poll** (~every minute), recording each active vehicle's position, bearing, and speed at that
+  moment. Roughly 500K rows/day — the row count is the grain check.
+- **`realtime.trip_updates`** is a **transaction fact table**: one row per **predicted stop
+  event per poll** (trip × stop × poll). Each row is one snapshot of one arrival prediction;
+  at ~10M rows/day, most rows supersede an earlier prediction of the same stop event — which
+  is exactly the redundancy the next table exists to collapse.
+- **`realtime.stop_delays`** *(P2.15, planned)* is an **accumulating-snapshot fact table**: one
+  row per **trip × stop_sequence**. Rows are upserted per poll — the predicted delay is
+  overwritten until the vehicle arrives, then finalized — so at any instant the table holds the
+  latest prediction for upcoming stops and the final value for passed ones. One mechanism
+  therefore serves both the live question ("how late is it right now") and the durable facts
+  the daily aggregates are built from, collapsing ~10M superseded predictions/day into one row
+  per stop event. Its schema, finalize trigger, and retention are open (§5.4).
+
+#### 5.1.2 Analytical (OLAP) facts
+
+- **`olap.stop_headway_distribution`** is a **periodic snapshot fact table**: one row per
+  **stop × direction × UTC day**, summarizing the headways observed in that cell — arrival
+  count, mean headway, coefficient of variation, p50/p90. It is real-time-only (no schedule
+  dependency) and exists because the analytical workload asks "how regular is service
+  typically," which a transaction-grain event table answers only via an expensive recompute.
+- **`olap.route_reliability_daily`** is a **periodic snapshot fact table**: one row per
+  **route × UTC day** — on-time percentage, mean and median delay, observation count. It
+  **aggregates the finalized `stop_delays` records and is never recomputed from raw RT plus
+  schedule** (ADR-017: compute delay once at event time, persist it, then GROUP BY for
+  history). Daily grain suffices — the question is about typical behavior, not intraday state.
+
+### 5.2 The dimensions and the SCD stance
+
+The `static_gtfs.*` tables are the **conformed dimensions** shared by every fact table, hot and
+analytical alike. The stance, stated once for the group: **SCD Type 1, full-replace daily** —
+history lives in the facts, not in dimension versions, because delay is computed at event time
+against the then-current schedule and persisted (timestamp the fact instead of versioning the
+dimension). Keys are **natural keys, not surrogates** — defensible because Type 1 plus a single
+authoritative source means nothing needs version-tracking.
+
+- **`static_gtfs.stops`** — one row per stop; `stop_id` is the key.
+- **`static_gtfs.routes`** — one row per route; `route_id` is the key.
+- **`static_gtfs.trips`** — one row per trip; `trip_id` is the key (it appears directly in
+  `stop_delays`' grain).
+- **`static_gtfs.agency`** — one row per agency; `agency_id` is the key. Multi-agency ingestion
+  (v0.2) is where conformance becomes real work: reconciling each agency's GTFS dialect into
+  these shared dimensions.
+- **`static_gtfs.stop_times` and `calendar`** are the schedule itself — reference data consumed
+  at event-time delay computation, not queried dimensionally.
+- **`olap.dim_date`** — one row per day; the date is the key. GTFS service days extend past
+  midnight (stop times like `25:30`), so a late-night trip's service day and its UTC calendar
+  day can differ; this table standardizes on **UTC days**, consistent with partitioning — a
+  deliberate simplification.
+- **Direction** is a **degenerate dimension**: it lives in the fact tables; no `dim_direction`
+  is needed.
+
+### 5.3 Data flow between the tiers
+
+**Capture.** The realtime assets write the operational facts every minute. Event-time delay
+computation upserts `realtime.stop_delays` against the current schedule as predictions arrive
+and finalizes each row on arrival.
+
+**Archive.** A nightly task writes each completed UTC day to the S3 cold tier as zstd Parquet.
+Target ordering: **verify the archive write, then drop the partition** (today partitions drop
+directly; the archive-then-drop ordering returns with the cold-tier gate — ADR-016). The 3-day
+hot window doubles as the safety margin for re-running a failed archive.
+
+**Aggregate.** The OLAP fill is a **permanent Dagster-scheduled asset with the same operational
+standing as ingestion** — run monitoring, the `backfill` concurrency tag, and idempotent
+per-day writes (delete the day, then insert). It runs nightly **on-box** using boring compute
+(DuckDB). Whether it reads the day from the cold-tier Parquet or from the still-hot partition
+is an open question (§5.4). Historical backfills and exploration run as **ad-hoc Spark in local
+mode on the dev machine — manual tasks, never scheduled flows** — landing their output as
+Parquet in `s3://…/olap_staging/`, consumed by the same idempotent loader. No cluster exists in
+the production path; distributed compute (the EMR week) is a learning track deliberately
+severed from production.
+
+**Serve.** The API and the analytical MCP tools read `olap.*`; the realtime and static schemas
+are served as they are today. The OLAP tables get their own freshness telemetry, same as every
+other pipeline (principle 2).
+
+### 5.4 Decided and open
+
+**Decided (2026-08-14):** the production OLAP fill runs forever, on-box, as a Dagster asset with
+full operational treatment — not on the dev machine (not always-on) and not on EMR (perpetual
+cost for a nightly ~150 MB increment). Spark's role is ad-hoc backfill and learning; the EMR
+week stays on the roadmap as education only, with nothing in the production path depending on
+it.
+
+**Open — resolve at the relevant build gate:**
+
+1. **Nightly read source:** cold-tier Parquet vs. the still-hot Postgres partition (the day
+   being aggregated is still within the 3-day window). Evaluate on contention with live
+   ingestion, incremental-aggregation feasibility per fact table, and whether keeping "OLAP
+   reads the cold tier" architecturally true is worth more than the pragmatism of reading hot.
+2. **Cold-tier write semantics** for the Iceberg step: idempotency, mid-job failure, compaction
+   — plus partitioning scheme and schema-evolution policy (V0.3.3 Q1–3). Also re-examine at
+   that gate whether Iceberg's justification still holds now that no cluster sits in the
+   production path.
+3. **Aggregation refresh semantics:** full overwrite vs. incremental merge (V0.3.4 Q5) —
+   leaning delete-day-then-insert, which is full overwrite at day grain.
+4. **Backfill strategy for newly added metrics** (V0.3.4 Q6): partition-bounded re-runs through
+   the `backfill`-tagged path.
+5. **`stop_delays` build questions** (P2.15): finalize trigger (`STOPPED_AT` vs.
+   stop_sequence advancing — TTC feed-quality dependent), the missed-finalization timeout
+   sweep, and the table's schema and retention.
+
+---
+
+## 6. Roadmap
 
 The backlog (`BACKLOG.md`) is the operational source of truth; this is the shape of it. The original versioned roadmap (v0.2 multi-agency → v0.3 VFH analytics → v0.4 datasets) has been superseded by the lakehouse arc, so milestones below are grouped by status rather than forced into the old numbering.
 
@@ -289,7 +445,7 @@ TTC GTFS-RT and static GTFS flowing continuously on a public box; `quantumlane.i
 
 ---
 
-## 6. Decision log
+## 7. Decision log
 
 ADRs live in `docs/adr/`. Status marked honestly — several decisions are referenced here before their ADR is written; the decision is real, the write-up is debt.
 
