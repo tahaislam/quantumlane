@@ -48,7 +48,7 @@ make build && make up
 ```
 or `docker compose -f ops/compose/docker-compose.yml --env-file .env up -d --build`
 
-This has burned us. Symptom of forgetting: you change code, run the asset, and
+This has burned us. Symptom of forgetting: change code, run the asset, and
 the behavior is identical to before — because the container is running the
 pre-edit image. If a fix "isn't working," verify the image was rebuilt before
 debugging the logic.
