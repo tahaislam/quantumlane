@@ -118,5 +118,5 @@ deploy: env-check  ## Deploy to the Hetzner box. Requires $DEPLOY_HOST in env. O
 	@bash ops/scripts/deploy.sh "$$DEPLOY_HOST"
 
 .PHONY: backup
-backup:  ## Run a manual database backup to R2
+backup:  ## Run a manual database backup to S3
 	@bash ops/scripts/backup.sh
