@@ -78,3 +78,21 @@ def ping() -> bool:
         return True
     except Exception:
         return False
+
+
+def vehicle_positions_age_seconds() -> float | None:
+    """
+    Seconds since the newest `realtime.vehicle_positions` row landed, or None if
+    the table has no rows at all (e.g. a fresh, never-ingested DB).
+
+    The single source of truth for realtime data staleness — /readyz is the only
+    caller today, but any future consumer should call this rather than
+    reimplementing the MAX(received_at) query.
+    """
+    row = fetch_one(
+        "SELECT EXTRACT(EPOCH FROM (NOW() - MAX(received_at))) AS age_seconds "
+        "FROM realtime.vehicle_positions"
+    )
+    if row is None or row["age_seconds"] is None:
+        return None
+    return float(row["age_seconds"])

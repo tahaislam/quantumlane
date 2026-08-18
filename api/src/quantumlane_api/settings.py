@@ -21,6 +21,16 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = Field(default=60, ge=1)
     environment: str = Field(default="development")
 
+    readyz_max_staleness_seconds: int = Field(
+        default=300,
+        ge=1,
+        description=(
+            "Max age of the newest realtime.vehicle_positions row before /readyz "
+            "reports 503. 5 minutes by default — TTC vehicle positions land far "
+            "more often than that when ingestion is healthy."
+        ),
+    )
+
 
 _settings: Settings | None = None
 

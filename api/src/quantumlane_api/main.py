@@ -91,6 +91,34 @@ def ready() -> JSONResponse:
     return JSONResponse(content={"status": "db_unreachable"}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
 
 
+@app.get("/readyz", tags=["ops"], summary="Deep readiness probe (data-freshness aware)")
+def readyz() -> JSONResponse:
+    """
+    Point uptime monitoring here, not at /health or /ready.
+
+    /health only proves the process is alive; /ready only proves Postgres is
+    reachable. Neither catches the failure mode that mattered in practice: the
+    2026-08-14 disk-full incident, where the API process kept answering and the
+    DB connection kept working while ingestion was crash-looped underneath it,
+    so both stayed green for three days with zero fresh data. This endpoint
+    checks the thing that actually matters — is data still arriving — by
+    reusing the same freshness query the rest of the platform relies on
+    (db.vehicle_positions_age_seconds).
+    """
+    try:
+        age_seconds = db.vehicle_positions_age_seconds()
+    except Exception:
+        return JSONResponse(content={"status": "db_unreachable"}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    if age_seconds is None:
+        return JSONResponse(content={"status": "no_data"}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    is_fresh = age_seconds <= settings.readyz_max_staleness_seconds
+    body = {"status": "ready" if is_fresh else "stale", "data_age_seconds": int(age_seconds)}
+    status_code = status.HTTP_200_OK if is_fresh else status.HTTP_503_SERVICE_UNAVAILABLE
+    return JSONResponse(content=body, status_code=status_code)
+
+
 # -----------------------------------------------------------------------------
 # v1 endpoints
 # -----------------------------------------------------------------------------

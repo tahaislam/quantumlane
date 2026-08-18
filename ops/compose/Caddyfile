@@ -4,6 +4,8 @@
 #   /                → static website
 #   /static/*        → static assets (JS, CSS)
 #   /v1/*            → FastAPI (versioned API + health)
+#   /readyz          → FastAPI deep readiness probe (data-freshness aware; point
+#                       uptime monitoring here, not at /health)
 #   /api/docs        → FastAPI OpenAPI docs (/api/* prefix is stripped → FastAPI /docs)
 #   /api/*           → FastAPI
 #   /mcp*            → MCP server (FastMCP, streamable HTTP). Path PRESERVED (not stripped).
@@ -28,6 +30,9 @@
         reverse_proxy api:8000
     }
     handle /health {
+        reverse_proxy api:8000
+    }
+    handle /readyz {
         reverse_proxy api:8000
     }
     # MCP server. Path is PRESERVED (handle, not handle_path) — the FastMCP app
@@ -74,6 +79,9 @@ quantumlane.io {
         reverse_proxy api:8000
     }
     handle /health {
+        reverse_proxy api:8000
+    }
+    handle /readyz {
         reverse_proxy api:8000
     }
     # MCP server — public endpoint for LLM clients (Claude, ChatGPT) at

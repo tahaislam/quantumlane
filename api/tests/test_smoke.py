@@ -21,3 +21,4 @@ def test_openapi_docs_load(api_client: TestClient) -> None:
     spec = response.json()
     assert spec["info"]["title"] == "QuantumLane API"
     assert "/v1/freshness" in spec["paths"]
+    assert "/readyz" in spec["paths"]

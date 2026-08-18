@@ -176,6 +176,9 @@ created for the next 7 UTC days.
 ```
 GET       /health                        — liveness probe (GET and HEAD; uptime monitors send HEAD)
 GET       /ready                         — readiness probe (DB-aware)
+GET       /readyz                        — deep readiness probe (data-freshness aware; 503 if the
+                                           newest realtime.vehicle_positions row is stale — this is
+                                           what uptime monitoring should point at, not /health)
 GET       /v1/agencies                   — list agencies
 GET       /v1/freshness                  — per-feed freshness summary
 GET       /v1/vehicle-positions/latest   — most recent position per vehicle
