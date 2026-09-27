@@ -47,12 +47,18 @@ schedule_storage:
         env: DAGSTER_POSTGRES_DB
       port: 5432
 
-# Run coordinator: default queues up to 10 concurrent runs. Plenty for our scale.
+# Run coordinator. max_concurrent_runs is bounded by RAM, not by ambition: the
+# DefaultRunLauncher forks each run as its own Python process off the dagster-code
+# gRPC server, at roughly 200-250 MB apiece. The CPX21 has 3.7 GB total with ~2.4 GB
+# already held by the two Postgres instances, the code server, webserver, daemon,
+# api, mcp and caddy — and no swap. Ten concurrent workers do not fit: on 2026-09-27
+# a burst of 10 drove load average to 50 on 3 vCPUs and locked sshd out of the box.
+# Three fits, and still clears the ~2.2 runs/min the schedules produce.
 run_coordinator:
   module: dagster.core.run_coordinator
   class: QueuedRunCoordinator
   config:
-    max_concurrent_runs: 10
+    max_concurrent_runs: 3
     tag_concurrency_limits:
       - key: "dagster/concurrency_key"
         value: "backfill"
