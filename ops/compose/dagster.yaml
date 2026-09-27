@@ -90,3 +90,16 @@ run_monitoring:
   cancel_timeout_seconds: 300
   # Max times the daemon will resume a run after a crash before giving up.
   max_resume_run_attempts: 0
+  # Hard ceiling on how long a run may stay in STARTED. Without it the run queue
+  # wedges permanently: the DefaultRunLauncher reports
+  # supports_check_run_worker_health = False, so the MonitoringDaemon cannot detect a
+  # run whose worker died (start_timeout_seconds only covers STARTING). Every crash
+  # or container restart then orphans a run that holds its concurrency slot for good
+  # — ten of those saturates max_concurrent_runs and nothing is ever dequeued again.
+  # That is what cost us 2026-09-10 → 09-26. A runtime cap is enforced regardless of
+  # launcher health-check support, so it is what actually reaps the orphans.
+  #
+  # Sized against observed SUCCESS durations: parquet_export_daily 404-530 s,
+  # static_gtfs_daily ~80 s, ttc_realtime_30s ~6 s. Deliberately generous — a false
+  # kill of the daily S3 export costs archived data, a slow reap costs 30 minutes.
+  max_runtime_seconds: 1800
