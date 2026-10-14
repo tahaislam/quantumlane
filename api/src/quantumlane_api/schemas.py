@@ -37,6 +37,14 @@ class FeedFreshness(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     feed_key: str
     last_record_at: datetime | None
+    last_record_source: str | None = Field(
+        default=None,
+        description=(
+            "Where last_record_at came from: 'hot' (live realtime table) or 'watermark' "
+            "(hot tier rotated out; value carried from ops.feed_watermark). "
+            "Null when the feed has never ingested."
+        ),
+    )
     record_count_5min: int
     record_count_1h: int
     lag_seconds: int | None

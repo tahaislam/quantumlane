@@ -34,6 +34,18 @@
       </p>
     </section>
 
+    <!-- Incident banner. Static on purpose: the cause and the link are human knowledge.
+         app.js hides it automatically once every feed in data-feeds is healthy again;
+         remove it from the HTML when the incident is closed out. -->
+    <section id="incident-banner" data-feeds="ttc.vehicle_positions,ttc.trip_updates,ttc.service_alerts"
+             class="mb-6 rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+      <span class="font-semibold">Incident — since Sep 10, 2026:</span>
+      upstream TTC GTFS-Realtime access is blocked (the feed host silently drops traffic from this
+      server's network). Realtime ingestion is paused, so vehicle-position queries return no rows;
+      routes, stops and schedules are unaffected.
+      <a href="https://github.com/tahaislam/quantumlane/blob/main/docs/DATA_GAPS.md" class="underline hover:text-amber-700">Details in the data-gap register →</a>
+    </section>
+
     <section class="mb-16">
       <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-500 mb-4">Live status</h2>
       <div id="freshness-summary" class="grid grid-cols-1 md:grid-cols-3 gap-4">

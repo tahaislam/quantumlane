@@ -51,11 +51,17 @@ def freshness_check(
 ) -> None:
     """
     For each tracked feed, compute:
-      - last_record_at: max(received_at)
+      - last_record_at: max(received_at), falling back to ops.feed_watermark when the
+        hot tier has no rows at all (outage longer than the 3-day retention window)
+      - last_record_source: 'hot' or 'watermark', so the page can say which it is
       - record_count_5min: rows in the last 5 minutes
       - record_count_1h: rows in the last hour
       - lag_seconds: now - last_record_at
       - status: derived from lag against thresholds
+
+    The watermark only ever moves forward. Without it, a long outage reads as
+    "never ingested" once retention rotates the last real rows out — freshness
+    metadata has to outlive the data's retention window.
 
     A row is written for every feed every minute. Old snapshots are not deleted here;
     a separate retention job in v0.2 will trim ops.freshness_snapshot to 30 days.
@@ -86,29 +92,63 @@ def freshness_check(
 
     with postgres.connection() as conn:
         with conn.cursor() as cur:
+            cur.execute("SELECT feed_key, last_record_at FROM ops.feed_watermark")
+            watermarks: dict[str, datetime] = dict(cur.fetchall())
+
             for feed_key, query in queries.items():
                 cur.execute(query)
                 row = cur.fetchone()
-                last_at, count_5m, count_1h = row if row else (None, 0, 0)
+                hot_max, count_5m, count_1h = row if row else (None, 0, 0)
 
+                last_at, source = _resolve_last_record(hot_max, watermarks.get(feed_key))
                 lag_s = int((snapshot_at - last_at).total_seconds()) if last_at else None
                 status = _classify(feed_key, lag_s)
+
+                if hot_max is not None:
+                    cur.execute(
+                        """
+                        INSERT INTO ops.feed_watermark (feed_key, last_record_at, updated_at)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (feed_key) DO UPDATE
+                            SET last_record_at = GREATEST(ops.feed_watermark.last_record_at,
+                                                          EXCLUDED.last_record_at),
+                                updated_at = EXCLUDED.updated_at
+                        """,
+                        (feed_key, hot_max, snapshot_at),
+                    )
 
                 cur.execute(
                     """
                     INSERT INTO ops.freshness_snapshot
-                        (snapshot_at, feed_key, last_record_at, record_count_5min,
-                         record_count_1h, lag_seconds, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        (snapshot_at, feed_key, last_record_at, last_record_source,
+                         record_count_5min, record_count_1h, lag_seconds, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (snapshot_at, feed_key, last_at, count_5m, count_1h, lag_s, status),
+                    (snapshot_at, feed_key, last_at, source, count_5m, count_1h, lag_s, status),
                 )
-                summary[feed_key] = f"{status} (lag={lag_s}s, 5m={count_5m})"
+                summary[feed_key] = f"{status} (lag={lag_s}s, 5m={count_5m}, source={source})"
         conn.commit()
 
     context.add_output_metadata(
         {feed_key: MetadataValue.text(s) for feed_key, s in summary.items()}
     )
+
+
+def _resolve_last_record(
+    hot_max: datetime | None, watermark: datetime | None
+) -> tuple[datetime | None, str | None]:
+    """
+    Pick the timestamp to report as last_record_at and say where it came from.
+
+    The hot tier wins whenever it has rows. When it is empty the watermark is the
+    only memory of when data last flowed; when both are missing the feed has
+    genuinely never ingested and the source is None.
+    """
+    if hot_max is not None:
+        return hot_max, "hot"
+    if watermark is not None:
+        return watermark, "watermark"
+    return None, None
 
 
 def _classify(feed_key: str, lag_s: int | None) -> str:

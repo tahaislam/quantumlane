@@ -31,6 +31,17 @@
       <code class="text-xs bg-slate-200 px-1 py-0.5 rounded">ingestion/assets/ops.py</code>.
     </p>
 
+    <!-- Incident banner — same markup as index.html; hidden by app.js once the feeds recover. -->
+    <section id="incident-banner" data-feeds="ttc.vehicle_positions,ttc.trip_updates,ttc.service_alerts"
+             class="mb-6 rounded-lg border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+      <span class="font-semibold">Incident — since Sep 10, 2026:</span>
+      upstream TTC GTFS-Realtime access is blocked (the feed host silently drops traffic from this
+      server's network). Realtime ingestion is paused, so vehicle-position queries return no rows;
+      routes, stops and schedules are unaffected. "Last record" below is carried from the feed
+      watermark — the hot tier only keeps 3 days.
+      <a href="https://github.com/tahaislam/quantumlane/blob/main/docs/DATA_GAPS.md" class="underline hover:text-amber-700">Details in the data-gap register →</a>
+    </section>
+
     <div id="freshness-table" class="bg-white rounded-lg border border-slate-200 overflow-hidden">
       <div class="p-6 text-slate-500">Loading...</div>
     </div>

@@ -113,7 +113,7 @@ See [ADR-001](adr/001-dagster-over-airflow.md) for the orchestrator choice.
 | `ttc_trip_updates` | TTC GTFS-RT TripUpdates | Every minute | `realtime.trip_updates` |
 | `ttc_service_alerts` | TTC GTFS-RT ServiceAlerts | Every 5 minutes | `realtime.service_alerts` |
 | `ttc_static_gtfs` | TTC static GTFS zip (CKAN) | Daily 04:00 Toronto | `static_gtfs.*` (full replace) |
-| `freshness_check` | Database query | Every minute | `ops.freshness_snapshot` |
+| `freshness_check` | Database query | Every minute | `ops.freshness_snapshot`, `ops.feed_watermark` |
 | `daily_parquet_export` | Database query | Nightly (partitioned by UTC day) | S3 `feed/dt=YYYY-MM-DD/part-0.parquet` |
 | `daily_partition_maintenance` | — | Daily 02:00 Toronto | Create next 7 days, drop >3 days |
 

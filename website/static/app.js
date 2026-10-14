@@ -29,13 +29,62 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  // Timestamps render in Toronto time with the zone spelled out ("2026-09-10 11:50 EDT")
+  // rather than the viewer's locale string, so two visitors see the same thing.
+  const TORONTO_TIME = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Toronto',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZoneName: 'short',
+  });
+
   function formatTime(iso) {
     if (!iso) return 'never';
     try {
-      return new Date(iso).toLocaleString();
+      const parts = {};
+      for (const p of TORONTO_TIME.formatToParts(new Date(iso))) parts[p.type] = p.value;
+      return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${parts.timeZoneName}`;
     } catch {
       return iso;
     }
+  }
+
+  // 2889542 → "33 d 10 h". Two units is enough to read; the raw seconds stay as secondary text.
+  function formatDuration(seconds) {
+    if (seconds === null || seconds === undefined) return '—';
+    const s = Math.max(0, Math.floor(seconds));
+    if (s < 60) return `${s} s`;
+    if (s < 3600) return `${Math.floor(s / 60)} m ${s % 60} s`;
+    if (s < 86400) return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} m`;
+    return `${Math.floor(s / 86400)} d ${Math.floor((s % 86400) / 3600)} h`;
+  }
+
+  function lagCell(seconds) {
+    if (seconds === null || seconds === undefined) return '—';
+    return `<span class="font-medium text-slate-900">${formatDuration(seconds)}</span>
+      <span class="text-xs text-slate-400 ml-1">${seconds.toLocaleString()} s</span>`;
+  }
+
+  // "Last record" distinguishes a feed that has never ingested from one whose last
+  // rows have aged out of the 3-day hot tier — those used to both read "never".
+  function lastRecordCell(item) {
+    if (!item.last_record_at) return '<span class="text-slate-400">never (no records yet)</span>';
+    const when = formatTime(item.last_record_at);
+    if (item.last_record_source === 'watermark') {
+      return `${when} <span class="block text-xs text-slate-400">hot tier since rotated</span>`;
+    }
+    return when;
+  }
+
+  // An incident banner is static HTML (the cause and link are human knowledge), but it
+  // hides itself once every feed it names is healthy again, so it can't go stale-wrong.
+  function updateIncidentBanner(payload) {
+    const el = document.getElementById('incident-banner');
+    if (!el) return;
+    const feeds = (el.dataset.feeds || '').split(',').map(s => s.trim()).filter(Boolean);
+    const byKey = Object.fromEntries((payload.data || []).map(i => [i.feed_key, i]));
+    const resolved = feeds.length > 0 && feeds.every(k => byKey[k] && byKey[k].status === 'healthy');
+    el.classList.toggle('hidden', resolved);
   }
 
   async function fetchJSON(path) {
@@ -49,6 +98,7 @@
   }
 
   function renderFreshnessSummary(payload) {
+    updateIncidentBanner(payload);
     const el = document.getElementById('freshness-summary');
     if (!el) return;
     const items = payload.data || [];
@@ -63,14 +113,16 @@
         <div class="text-xs font-mono text-slate-500 mb-2">${escapeHTML(item.feed_key)}</div>
         <div class="mb-3">${statusBadge(item.status)}</div>
         <div class="text-sm text-slate-600">
-          <div>Lag: <span class="font-medium text-slate-900">${item.lag_seconds === null ? '—' : item.lag_seconds + 's'}</span></div>
+          <div>Lag: ${lagCell(item.lag_seconds)}</div>
           <div>5-min count: <span class="font-medium text-slate-900">${item.record_count_5min.toLocaleString()}</span></div>
+          <div class="text-xs text-slate-500 mt-1">Last record: ${lastRecordCell(item)}</div>
         </div>
       </div>
     `).join('');
   }
 
   function renderFreshnessTable(payload) {
+    updateIncidentBanner(payload);
     const el = document.getElementById('freshness-table');
     if (!el) return;
     const items = payload.data || [];
@@ -82,10 +134,10 @@
       <tr class="border-t border-slate-100">
         <td class="px-6 py-4 font-mono text-xs">${escapeHTML(item.feed_key)}</td>
         <td class="px-6 py-4">${statusBadge(item.status)}</td>
-        <td class="px-6 py-4 text-sm text-slate-600">${item.lag_seconds === null ? '—' : item.lag_seconds + ' s'}</td>
+        <td class="px-6 py-4 text-sm text-slate-600">${lagCell(item.lag_seconds)}</td>
         <td class="px-6 py-4 text-sm text-slate-600">${item.record_count_5min.toLocaleString()}</td>
         <td class="px-6 py-4 text-sm text-slate-600">${item.record_count_1h.toLocaleString()}</td>
-        <td class="px-6 py-4 text-sm text-slate-500">${formatTime(item.last_record_at)}</td>
+        <td class="px-6 py-4 text-sm text-slate-500">${lastRecordCell(item)}</td>
       </tr>
     `).join('');
     el.innerHTML = `
@@ -223,7 +275,7 @@
   }
 
   window.QL = {
-    fetchJSON, fetchFreshness,
+    fetchJSON, fetchFreshness, formatTime, formatDuration,
     renderFreshnessSummary, renderFreshnessTable,
     renderDailyStats, renderVehiclesLatest, renderVehiclesInto, renderRecentRuns,
     renderError, renderErrorInto,

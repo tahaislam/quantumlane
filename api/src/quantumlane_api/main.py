@@ -121,7 +121,8 @@ def freshness(request: Request) -> Envelope[list[FeedFreshness]]:
     rows = db.fetch_all(
         """
         SELECT DISTINCT ON (feed_key)
-            feed_key, last_record_at, record_count_5min, record_count_1h, lag_seconds, status
+            feed_key, last_record_at, last_record_source,
+            record_count_5min, record_count_1h, lag_seconds, status
         FROM ops.freshness_snapshot
         ORDER BY feed_key, snapshot_at DESC
         """
