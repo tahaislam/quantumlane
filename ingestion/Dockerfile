@@ -30,7 +30,8 @@ RUN pip install --prefix=/install \
     "dagster>=1.9.0" \
     "dagster-postgres>=0.25.0" \
     "psycopg[binary,pool]>=3.2.0" \
-    "sqlalchemy>=2.0.30" \
+    "sqlalchemy>=2.0.30,<2.1" \
+    # 2.1 routes postgresql:// to psycopg3; dagster-postgres only speaks psycopg2
     "httpx>=0.27.0" \
     "tenacity>=9.0.0" \
     "gtfs-realtime-bindings>=1.0.0" \

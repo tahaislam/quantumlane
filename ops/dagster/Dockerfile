@@ -30,7 +30,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --prefix=/install \
     "dagster>=1.9.0,<2.0" \
     "dagster-webserver>=1.9.0,<2.0" \
-    "dagster-postgres>=0.25.0,<1.0"
+    "dagster-postgres>=0.25.0,<1.0" \
+    "sqlalchemy<2.1"
+# SQLAlchemy 2.1 resolves plain postgresql:// URLs to psycopg (v3); dagster-postgres
+# only speaks psycopg2 and fails with 'syntax error at or near "$1"' on every event write.
 
 # --- runtime ---
 FROM base AS runtime
