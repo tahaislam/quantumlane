@@ -6,6 +6,7 @@ Retry policy:
     Transient errors (timeout, connection error, 5xx) → up to 3 attempts with
     exponential backoff. 4xx fails fast — those are bugs in our request, not flakes.
 """
+
 from __future__ import annotations
 
 import httpx
@@ -18,6 +19,8 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
+
+from quantumlane_ingestion.settings import DEFAULT_USER_AGENT
 
 log = structlog.get_logger(__name__)
 
@@ -35,7 +38,7 @@ class GTFSRTResource(ConfigurableResource):
     """HTTP client tuned for fetching GTFS-RT protobuf feeds."""
 
     timeout_seconds: float = 15.0
-    user_agent: str = "QuantumLane/0.1"
+    user_agent: str = DEFAULT_USER_AGENT
     max_retries: int = 3
 
     _client: httpx.Client | None = PrivateAttr(default=None)

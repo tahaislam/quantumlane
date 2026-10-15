@@ -8,10 +8,18 @@ Why pydantic-settings:
 Env var conventions:
     All vars are prefixed QL_ to namespace cleanly. See .env.example for the full list.
 """
+
 from __future__ import annotations
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from quantumlane_ingestion import __version__
+
+# Sent on every outbound request. The TTC's gtfsrt.ttc.ca WAF returns 403 to generic
+# Python User-Agents (python-requests/*, Python-urllib/*), so this must stay a
+# product-identifying string. Derived from the package version so it never goes stale.
+DEFAULT_USER_AGENT = f"quantumlane-ingestion/{__version__} (+https://quantumlane.io)"
 
 
 class Settings(BaseSettings):
@@ -32,17 +40,18 @@ class Settings(BaseSettings):
     postgres_pool_size: int = Field(default=5, ge=1, le=50)
 
     # --- TTC GTFS-RT feeds ---
-    # The TTC publishes GTFS-RT at a known base URL. Configurable for testing.
+    # The TTC retired bustime.ttc.ca in 2026; gtfsrt.ttc.ca is the replacement.
+    # `?format=binary` selects protobuf (the host also serves JSON). Configurable for testing.
     ttc_vehicle_positions_url: str = Field(
-        default="https://bustime.ttc.ca/gtfsrt/vehicles",
+        default="https://gtfsrt.ttc.ca/vehicles/position?format=binary",
         description="TTC VehiclePositions feed URL.",
     )
     ttc_trip_updates_url: str = Field(
-        default="https://bustime.ttc.ca/gtfsrt/trips",
+        default="https://gtfsrt.ttc.ca/trips/update?format=binary",
         description="TTC TripUpdates feed URL.",
     )
     ttc_service_alerts_url: str = Field(
-        default="https://bustime.ttc.ca/gtfsrt/alerts",
+        default="https://gtfsrt.ttc.ca/alerts/all?format=binary",
         description="TTC ServiceAlerts feed URL.",
     )
     ttc_static_gtfs_url: str = Field(
@@ -53,8 +62,11 @@ class Settings(BaseSettings):
     # --- HTTP ---
     http_timeout_seconds: float = Field(default=15.0, ge=1.0, le=120.0)
     http_user_agent: str = Field(
-        default="QuantumLane/0.1 (https://quantumlane.io; contact@quantumlane.io)",
-        description="UA string sent with every outbound request. Be a polite citizen.",
+        default=DEFAULT_USER_AGENT,
+        description=(
+            "UA string sent with every outbound request. Must identify the product: "
+            "the TTC WAF rejects generic Python User-Agents with 403."
+        ),
     )
 
     # --- S3 / object storage (cold tier) ---

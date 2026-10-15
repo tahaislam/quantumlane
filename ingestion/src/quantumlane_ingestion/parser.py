@@ -7,6 +7,7 @@ Design notes:
     - Field-population signatures are computed here too (used for schema-drift detection).
     - GTFS-RT optional fields are *frequently* not populated; defensive .HasField checks throughout.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -34,6 +35,30 @@ def feed_timestamp(feed: gtfs_realtime_pb2.FeedMessage) -> datetime:
 def payload_hash(payload: bytes) -> str:
     """sha256 of the full protobuf payload. Used for dedupe and audit."""
     return hashlib.sha256(payload).hexdigest()
+
+
+def _event_time(stu: Any, field: str) -> datetime | None:
+    """
+    Pull `arrival`/`departure`.time off a StopTimeUpdate as a UTC datetime, or None.
+
+    None when the StopTimeEvent is absent (NO_DATA updates carry neither block), when
+    it carries only a delay, or when time is 0 — proto2 defaults an unset int64 to 0,
+    and 1970-01-01 is never a real prediction. Never write epoch zero.
+    """
+    if not stu.HasField(field):
+        return None
+    event = getattr(stu, field)
+    if not event.HasField("time") or event.time <= 0:
+        return None
+    return datetime.fromtimestamp(event.time, tz=UTC)
+
+
+def _event_delay(stu: Any, field: str) -> int | None:
+    """`arrival`/`departure`.delay in seconds, or None when the block or field is absent."""
+    if not stu.HasField(field):
+        return None
+    event = getattr(stu, field)
+    return event.delay if event.HasField("delay") else None
 
 
 def vehicle_position_rows(
@@ -64,6 +89,9 @@ def vehicle_position_rows(
             continue  # without a position, the row is meaningless
 
         pos = v.position
+        # gtfsrt.ttc.ca omits the trip block entirely for vehicles not on a trip
+        # (deadheading, laying over, out of service) — roughly 40% of entities at
+        # any moment. Keep the position; trip_id/route_id/direction_id are NULL.
         trip = v.trip if v.HasField("trip") else None
         vehicle = v.vehicle if v.HasField("vehicle") else None
 
@@ -75,7 +103,9 @@ def vehicle_position_rows(
                 "vehicle_id": vehicle.id if vehicle and vehicle.HasField("id") else None,
                 "trip_id": trip.trip_id if trip and trip.HasField("trip_id") else None,
                 "route_id": trip.route_id if trip and trip.HasField("route_id") else None,
-                "direction_id": trip.direction_id if trip and trip.HasField("direction_id") else None,
+                "direction_id": trip.direction_id
+                if trip and trip.HasField("direction_id")
+                else None,
                 "longitude": pos.longitude,
                 "latitude": pos.latitude,
                 "bearing": pos.bearing if pos.HasField("bearing") else None,
@@ -103,6 +133,17 @@ def trip_update_rows(
     """
     Convert TripUpdate entities to row dicts. One row per StopTimeUpdate
     (so a single TripUpdate with 30 stops becomes 30 rows).
+
+    Shapes gtfsrt.ttc.ca emits that the retired bustime feed did not — all pass
+    through as-observed, none are dropped:
+        - Trips with schedule_relationship NEW (8) or DELETED (7) carrying a
+          synthetic *negative* trip_id (e.g. "-1044218284") that is not in the
+          static catalog. trip_id is TEXT and schedule_relationship is stored as the
+          raw enum int, so both land unchanged; consumers filter on the latter.
+        - StopTimeUpdates with schedule_relationship NO_DATA and no arrival/departure
+          block at all. Times and delays are NULL for those rows — never epoch zero.
+    Unknown enum values (a future addition to the spec) are left unset by protobuf
+    and therefore stored as NULL rather than failing the poll.
     """
     fts = feed_timestamp(feed)
     rows: list[dict[str, Any]] = []
@@ -114,16 +155,6 @@ def trip_update_rows(
         tu = entity.trip_update
         trip = tu.trip
         for stu in tu.stop_time_update:
-            arrival_dt = (
-                datetime.fromtimestamp(stu.arrival.time, tz=UTC)
-                if stu.HasField("arrival") and stu.arrival.HasField("time")
-                else None
-            )
-            departure_dt = (
-                datetime.fromtimestamp(stu.departure.time, tz=UTC)
-                if stu.HasField("departure") and stu.departure.HasField("time")
-                else None
-            )
             rows.append(
                 {
                     "received_at": received_at,
@@ -132,22 +163,20 @@ def trip_update_rows(
                     "trip_id": trip.trip_id if trip.HasField("trip_id") else None,
                     "route_id": trip.route_id if trip.HasField("route_id") else None,
                     "direction_id": trip.direction_id if trip.HasField("direction_id") else None,
-                    "start_date": _parse_yyyymmdd(trip.start_date) if trip.HasField("start_date") else None,
+                    "start_date": _parse_yyyymmdd(trip.start_date)
+                    if trip.HasField("start_date")
+                    else None,
                     "schedule_relationship": (
-                        trip.schedule_relationship if trip.HasField("schedule_relationship") else None
+                        trip.schedule_relationship
+                        if trip.HasField("schedule_relationship")
+                        else None
                     ),
                     "stop_sequence": stu.stop_sequence if stu.HasField("stop_sequence") else None,
                     "stop_id": stu.stop_id if stu.HasField("stop_id") else None,
-                    "arrival_time": arrival_dt,
-                    "arrival_delay_s": (
-                        stu.arrival.delay if stu.HasField("arrival") and stu.arrival.HasField("delay") else None
-                    ),
-                    "departure_time": departure_dt,
-                    "departure_delay_s": (
-                        stu.departure.delay
-                        if stu.HasField("departure") and stu.departure.HasField("delay")
-                        else None
-                    ),
+                    "arrival_time": _event_time(stu, "arrival"),
+                    "arrival_delay_s": _event_delay(stu, "arrival"),
+                    "departure_time": _event_time(stu, "departure"),
+                    "departure_delay_s": _event_delay(stu, "departure"),
                     "raw_payload_hash": payload_hash_str,
                 }
             )
@@ -176,7 +205,11 @@ def service_alert_rows(
         affected_routes = sorted({s.route_id for s in a.informed_entity if s.HasField("route_id")})
         affected_stops = sorted({s.stop_id for s in a.informed_entity if s.HasField("stop_id")})
         affected_trips = sorted(
-            {s.trip.trip_id for s in a.informed_entity if s.HasField("trip") and s.trip.HasField("trip_id")}
+            {
+                s.trip.trip_id
+                for s in a.informed_entity
+                if s.HasField("trip") and s.trip.HasField("trip_id")
+            }
         )
 
         # active_period is repeated; v0.1 takes the first window. v0.2 may model multi-window alerts.

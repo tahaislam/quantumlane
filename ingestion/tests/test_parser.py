@@ -5,6 +5,7 @@ The parser is pure functions — bytes in, dicts out — so it's the easiest pie
 thoroughly. We construct synthetic FeedMessage protobufs in-process rather than fixtures
 so the tests don't depend on captured TTC payloads (which would go stale).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -68,9 +69,9 @@ def _build_alert_feed() -> gtfs_realtime_pb2.FeedMessage:
     e = feed.entity.add()
     e.id = "alert-001"
     a = e.alert
-    a.cause = 9          # CONSTRUCTION
-    a.effect = 4         # DETOUR
-    a.severity_level = 2 # WARNING
+    a.cause = 9  # CONSTRUCTION
+    a.effect = 4  # DETOUR
+    a.severity_level = 2  # WARNING
     t = a.header_text.translation.add()
     t.text = "504 King: detour at Spadina"
     t.language = "en"
@@ -191,3 +192,134 @@ def test_field_signature_changes_when_optional_field_added() -> None:
     sig2, _ = field_signature(f2)
 
     assert sig1 != sig2
+
+
+# -----------------------------------------------------------------------------
+# Shapes introduced by gtfsrt.ttc.ca (the bustime.ttc.ca replacement, 2026)
+# -----------------------------------------------------------------------------
+
+
+def test_vehicle_position_without_trip_block_is_kept(now: datetime) -> None:
+    """~40% of gtfsrt.ttc.ca vehicles carry no trip block (deadheading / out of service).
+
+    The position is still a real observation: keep the row, NULL the trip fields.
+    """
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    feed.header.timestamp = 1_700_000_000
+    e = feed.entity.add()
+    e.id = "1"
+    v = e.vehicle
+    v.vehicle.id = "3630"
+    v.position.latitude = 43.746254
+    v.position.longitude = -79.5321045
+    v.position.bearing = 253.0
+    v.position.speed = 0.0
+    v.timestamp = 1_699_999_990
+    v.occupancy_status = 0  # EMPTY
+    # No v.trip at all.
+    rows = vehicle_position_rows(feed, agency_id="ttc", received_at=now)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["vehicle_id"] == "3630"
+    assert row["trip_id"] is None
+    assert row["route_id"] is None
+    assert row["direction_id"] is None
+    assert row["latitude"] == pytest.approx(43.746254)
+    assert row["occupancy_status"] == 0
+
+
+def test_trip_update_new_trip_with_negative_trip_id(now: datetime) -> None:
+    """NEW (8) / DELETED (7) trips carry synthetic negative trip_ids. Stored as-observed."""
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    feed.header.timestamp = 1_700_000_000
+    e = feed.entity.add()
+    e.id = "1"
+    tu = e.trip_update
+    tu.trip.trip_id = "-1044218284"
+    tu.trip.route_id = "600"
+    tu.trip.schedule_relationship = gtfs_realtime_pb2.TripDescriptor.ScheduleRelationship.Value(
+        "NEW"
+    )
+    stu = tu.stop_time_update.add()
+    stu.stop_sequence = 1
+    stu.stop_id = "18804"
+    stu.departure.time = 1_700_000_100
+    rows = trip_update_rows(feed, agency_id="ttc", received_at=now)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["trip_id"] == "-1044218284"
+    assert row["route_id"] == "600"
+    assert row["schedule_relationship"] == 8
+    assert row["departure_time"] == datetime(2023, 11, 14, 22, 15, 0, tzinfo=UTC)
+    assert row["arrival_time"] is None
+
+
+def test_trip_update_no_data_stop_has_null_times(now: datetime) -> None:
+    """NO_DATA stop_time_updates carry no arrival/departure block: times are NULL, never 1970."""
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    feed.header.timestamp = 1_700_000_000
+    e = feed.entity.add()
+    e.id = "1"
+    tu = e.trip_update
+    tu.trip.trip_id = "29232020"
+    tu.trip.route_id = "96"
+    no_data = gtfs_realtime_pb2.TripUpdate.StopTimeUpdate.ScheduleRelationship.Value("NO_DATA")
+    stu = tu.stop_time_update.add()
+    stu.stop_sequence = 1
+    stu.stop_id = "14363"
+    stu.schedule_relationship = no_data
+    stu2 = tu.stop_time_update.add()
+    stu2.stop_sequence = 2
+    stu2.stop_id = "14364"
+    stu2.arrival.time = 1_700_000_200
+    rows = trip_update_rows(feed, agency_id="ttc", received_at=now)
+    assert len(rows) == 2
+    nd, ok = rows
+    assert nd["stop_id"] == "14363"
+    assert nd["arrival_time"] is None
+    assert nd["departure_time"] is None
+    assert nd["arrival_delay_s"] is None
+    assert nd["departure_delay_s"] is None
+    assert ok["arrival_time"] == datetime(2023, 11, 14, 22, 16, 40, tzinfo=UTC)
+
+
+def test_trip_update_epoch_zero_time_is_null(now: datetime) -> None:
+    """An explicit time of 0 (proto2 default for an unset int64) must not become 1970-01-01."""
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    feed.header.timestamp = 1_700_000_000
+    e = feed.entity.add()
+    e.id = "1"
+    tu = e.trip_update
+    tu.trip.trip_id = "T-1"
+    stu = tu.stop_time_update.add()
+    stu.stop_sequence = 1
+    stu.stop_id = "S-1"
+    stu.arrival.time = 0
+    stu.arrival.delay = 45
+    stu.departure.delay = 30  # delay-only block, no time
+    rows = trip_update_rows(feed, agency_id="ttc", received_at=now)
+    row = rows[0]
+    assert row["arrival_time"] is None
+    assert row["arrival_delay_s"] == 45
+    assert row["departure_time"] is None
+    assert row["departure_delay_s"] == 30
+
+
+def test_default_user_agent_identifies_product_and_version() -> None:
+    """The TTC WAF 403s generic Python UAs; ours must be product/version (+url)."""
+    import re
+
+    from quantumlane_ingestion import __version__
+    from quantumlane_ingestion.resources import GTFSRTResource
+    from quantumlane_ingestion.settings import DEFAULT_USER_AGENT
+
+    expected = f"quantumlane-ingestion/{__version__} (+https://quantumlane.io)"
+    assert expected == DEFAULT_USER_AGENT
+    assert re.fullmatch(
+        r"quantumlane-ingestion/\d+\.\d+\.\d+ \(\+https://quantumlane\.io\)", DEFAULT_USER_AGENT
+    )
+    assert GTFSRTResource().user_agent == DEFAULT_USER_AGENT

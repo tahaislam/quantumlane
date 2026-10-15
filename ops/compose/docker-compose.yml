@@ -59,11 +59,13 @@ services:
     restart: unless-stopped
     environment:
       QL_POSTGRES_DSN: ${QL_POSTGRES_DSN}
-      QL_TTC_VEHICLE_POSITIONS_URL: ${QL_TTC_VEHICLE_POSITIONS_URL:-https://bustime.ttc.ca/gtfsrt/vehicles}
-      QL_TTC_TRIP_UPDATES_URL: ${QL_TTC_TRIP_UPDATES_URL:-https://bustime.ttc.ca/gtfsrt/trips}
-      QL_TTC_SERVICE_ALERTS_URL: ${QL_TTC_SERVICE_ALERTS_URL:-https://bustime.ttc.ca/gtfsrt/alerts}
+      QL_TTC_VEHICLE_POSITIONS_URL: ${QL_TTC_VEHICLE_POSITIONS_URL:-https://gtfsrt.ttc.ca/vehicles/position?format=binary}
+      QL_TTC_TRIP_UPDATES_URL: ${QL_TTC_TRIP_UPDATES_URL:-https://gtfsrt.ttc.ca/trips/update?format=binary}
+      QL_TTC_SERVICE_ALERTS_URL: ${QL_TTC_SERVICE_ALERTS_URL:-https://gtfsrt.ttc.ca/alerts/all?format=binary}
       QL_TTC_STATIC_GTFS_URL: ${QL_TTC_STATIC_GTFS_URL:-https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/7795b45e-e65a-4465-81fc-c36b9dfff169/resource/cfb6b2b8-6191-41e3-bda1-b175c51148cb/download/TTC%20Routes%20and%20Schedules%20Data.zip}
-      QL_HTTP_USER_AGENT: ${QL_HTTP_USER_AGENT}
+      # QL_HTTP_USER_AGENT is deliberately NOT forwarded: the UA is derived from the
+      # package version in settings.py (quantumlane-ingestion/<version>), and a stale
+      # override in .env would silently send the old string to the TTC WAF.
       QL_S3_ACCESS_KEY_ID: ${QL_S3_ACCESS_KEY_ID}
       QL_S3_SECRET_ACCESS_KEY: ${QL_S3_SECRET_ACCESS_KEY}
       QL_S3_BUCKET: ${QL_S3_BUCKET}

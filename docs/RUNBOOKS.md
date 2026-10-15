@@ -231,13 +231,19 @@ From the candidate host (or an SSH session on it):
 
 ```bash
 for url in \
-    https://bustime.ttc.ca/gtfsrt/vehicles \
-    https://bustime.ttc.ca/gtfsrt/trips \
-    https://bustime.ttc.ca/gtfsrt/alerts; do
+    'https://gtfsrt.ttc.ca/vehicles/position?format=binary' \
+    'https://gtfsrt.ttc.ca/trips/update?format=binary' \
+    'https://gtfsrt.ttc.ca/alerts/all?format=binary'; do
     printf '%s -> ' "$url"
-    curl -m 10 -sS -o /dev/null -w '%{http_code}\n' "$url" || echo "UNREACHABLE"
+    curl -m 10 -sS -o /dev/null -w '%{http_code}\n' \
+        -A 'quantumlane-ingestion/0.0.0 (+https://quantumlane.io)' "$url" || echo "UNREACHABLE"
 done
 ```
+
+The `-A` matters: the `gtfsrt.ttc.ca` WAF answers `403` to generic Python
+User-Agents (`python-requests/*`, `Python-urllib/*`), so test with the same
+product-identifying UA the ingestion sends. `bustime.ttc.ca` was retired in
+2026 and is no longer the host to check.
 
 Interpreting the result:
 
