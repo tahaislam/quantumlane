@@ -55,7 +55,7 @@ app = FastAPI(
         "Rate-limited to 60 req/min/IP. No auth required. "
         "See https://quantumlane.io for the project."
     ),
-    version="0.4.0",
+    version="0.4.1",
     lifespan=lifespan,
     root_path="/api",
 )

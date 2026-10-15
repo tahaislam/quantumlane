@@ -1,6 +1,6 @@
 [project]
 name = "quantumlane-mcp"
-version = "0.1.0"
+version = "0.4.1"
 description = "MCP server exposing QuantumLane TTC transit data as tools for LLM clients."
 requires-python = ">=3.12"
 dependencies = [
