@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     )
 
     rate_limit_per_minute: int = Field(default=60, ge=1)
+    readyz_stale_after_seconds: int = Field(
+        default=300,
+        ge=30,
+        description=(
+            "/readyz returns 503 when the newest realtime row on any required feed is older "
+            "than this. Must exceed the ingestion cadence (1 min) with margin for a slow poll."
+        ),
+    )
     environment: str = Field(default="development")
 
 

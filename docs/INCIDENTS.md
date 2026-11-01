@@ -104,8 +104,12 @@ absent in the new feed (0 of ~20k stop updates carried one) — the P2.15
 delay-derivation design is unchanged.
 
 **Action items:**
-- [ ] Alert on zero realtime rows for N minutes (#8, #9, #13) — this outage was
-      noticed by a human, not a monitor.
+- [x] Alert on zero realtime rows for N minutes (#8) — `GET /readyz` returns 503
+      once the newest `vehicle_positions` / `trip_updates` row is older than
+      `QL_READYZ_STALE_AFTER_SECONDS` (300). Shipped 2026-11-01; repoint the
+      uptime monitor at it. #9 (external dead-man's switch) and #13 (per-run
+      failure notifications) remain open — this outage was noticed by a human,
+      not a monitor.
 - [ ] Make `make deploy` print the schedule states after `up`, so a stopped
       schedule is visible at deploy time.
 - [ ] Re-check the TTC developer docs quarterly for endpoint changes.

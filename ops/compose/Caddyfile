@@ -30,6 +30,11 @@
     handle /health {
         reverse_proxy api:8000
     }
+    # Data-freshness readiness (503 when realtime rows stop arriving). This is
+    # the path the uptime monitor should watch; /health is liveness only.
+    handle /readyz {
+        reverse_proxy api:8000
+    }
     # MCP server. Path is PRESERVED (handle, not handle_path) — the FastMCP app
     # serves at /mcp, so Caddy must forward /mcp intact. mcp:8100 is reached over
     # the compose network (the mcp service publishes no host port).
@@ -74,6 +79,11 @@ quantumlane.io {
         reverse_proxy api:8000
     }
     handle /health {
+        reverse_proxy api:8000
+    }
+    # Data-freshness readiness (503 when realtime rows stop arriving). This is
+    # the path the uptime monitor should watch; /health is liveness only.
+    handle /readyz {
         reverse_proxy api:8000
     }
     # MCP server — public endpoint for LLM clients (Claude, ChatGPT) at

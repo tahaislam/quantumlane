@@ -22,6 +22,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from quantumlane_api import db
+from quantumlane_api import freshness as freshness_repo
 from quantumlane_api.schemas import (
     Agency,
     DailyStat,
@@ -95,6 +96,35 @@ def ready() -> JSONResponse:
     return JSONResponse(
         content={"status": "db_unreachable"}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE
     )
+
+
+@app.api_route(
+    "/readyz",
+    methods=["GET", "HEAD"],
+    tags=["ops"],
+    summary="Data-freshness readiness probe (the one for uptime monitors)",
+)
+def readyz() -> JSONResponse:
+    """
+    200 when realtime rows are actually arriving. 503 when the newest row on any
+    required feed (vehicle_positions, trip_updates) is older than
+    QL_READYZ_STALE_AFTER_SECONDS (default 300), or when the database is unreachable.
+
+    Point the uptime monitor here, not at /health. /health stayed green through the
+    August 2026 72-hour ingestion outage because the API process never died; this
+    endpoint goes red within one threshold of rows stopping, whatever the cause —
+    dead Dagster, full disk, upstream feed gone, schedule stopped by hand.
+    """
+    try:
+        report = freshness_repo.readiness(settings.readyz_stale_after_seconds)
+    except Exception:
+        log.exception("readyz_db_error")
+        return JSONResponse(
+            content={"status": "db_unreachable"},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    code = status.HTTP_200_OK if report.ready else status.HTTP_503_SERVICE_UNAVAILABLE
+    return JSONResponse(content=report.to_dict(), status_code=code)
 
 
 # -----------------------------------------------------------------------------

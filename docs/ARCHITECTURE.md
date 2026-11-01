@@ -176,6 +176,9 @@ created for the next 7 UTC days.
 ```
 GET       /health                        — liveness probe (GET and HEAD; uptime monitors send HEAD)
 GET       /ready                         — readiness probe (DB-aware)
+GET       /readyz                        — data-freshness readiness (GET and HEAD): 503 when the newest
+                                           vehicle_positions / trip_updates row is older than
+                                           QL_READYZ_STALE_AFTER_SECONDS (300). Uptime monitors watch THIS.
 GET       /v1/agencies                   — list agencies
 GET       /v1/freshness                  — per-feed freshness summary
 GET       /v1/vehicle-positions/latest   — most recent position per vehicle
