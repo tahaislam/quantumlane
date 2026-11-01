@@ -9,6 +9,35 @@ cause, whether it is recoverable, and links.
 
 ---
 
+## 2026-10-30 → 2026-11-01 — TTC `service_alerts` only (upstream 500s, ~1–1.5 days)
+
+- **Window (UTC):** `2026-10-30 06:15` → sometime before `2026-11-01 16:50`.
+  The start is the last `last_seen_at` row; the end is the first check that
+  found alerts flowing again. The exact recovery time is in the Dagster run
+  history for `ttc_alerts_5m_job` on the production box and was not pulled.
+- **Affected:** `realtime.service_alerts` only. `vehicle_positions` and
+  `trip_updates` were healthy throughout (lag ~2 s, normal row rates), so this
+  is not a repeat of the host-level outages above.
+- **Cause — probably upstream, not confirmed.** On `2026-10-31 ~05:15`,
+  `https://gtfsrt.ttc.ca/alerts/all?format=binary` returned **HTTP 500 with an
+  empty body** from the dev machine while `/vehicles/position` and
+  `/trips/update` on the same host returned 200. By `2026-11-01 16:50` it
+  returned 200 with a ~42 KB payload and production was upserting again. That
+  one observation is the only direct evidence. It is also possible that part
+  of the window was simply a period with no active alerts (the feed returns an
+  empty entity list and the asset writes nothing), or that the 500 was
+  intermittent and the asset's retries hid most of it. The freshness page
+  reported `down` either way, because for alerts "no rows" and "feed broken"
+  are indistinguishable.
+- **Recoverable?** **No**, but the loss is small. Alerts are *upserted* by
+  `(agency_id, alert_id)`, not appended: any alert active across the whole
+  window survived with a gap in its `last_seen_at` trail, and only alerts that
+  began and ended inside the window were never captured.
+- **Follow-ups:** the alerts asset should record "fetched OK, zero entities"
+  distinctly from "fetch failed" so an empty feed and a broken feed can be told
+  apart after the fact (the `ops.ingestion_failures` table has the failures;
+  the empty-but-OK polls leave no trace). Related monitoring issues: #8, #13.
+
 ## 2026-09-10 → 2026-10-15 — TTC realtime feeds (upstream host retired, ~35 days)
 
 - **Window (UTC):** `2026-09-10 15:50` → `2026-10-15 05:04`
