@@ -4,6 +4,7 @@ Unit tests for the pure helpers in the ops assets.
 The assets themselves need a database; the pieces that decide what a freshness
 snapshot says do not, so those are tested here.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime

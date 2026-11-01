@@ -6,14 +6,12 @@ We define explicit Pydantic models rather than returning dicts so:
     - Field renaming is centralized
     - Response shape changes break the build, not silently the website
 """
+
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
-
-T = TypeVar("T")
 
 
 class Meta(BaseModel):
@@ -22,7 +20,7 @@ class Meta(BaseModel):
     next_cursor: str | None = None
 
 
-class Envelope(BaseModel, Generic[T]):
+class Envelope[T](BaseModel):
     data: T
     meta: Meta
 

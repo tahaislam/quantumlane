@@ -19,6 +19,7 @@ Failure handling (realtime):
     Tenacity-level retries happen inside the GTFSRTResource for transient HTTP errors;
     by the time we reach this layer, retries have been exhausted.
 """
+
 from __future__ import annotations
 
 import csv
@@ -45,7 +46,6 @@ from dagster import (
 # The simplest robust fix is to omit the annotation on `context` specifically.
 # Resources passed as keyword args (gtfs_rt, postgres) are annotated normally because
 # Dagster resolves those via resource_defs keys, not via type hints.
-
 from quantumlane_ingestion.parser import (
     field_signature,
     parse_feed,
@@ -74,7 +74,7 @@ def _record_failure(
     """Persist a failure to ops.ingestion_failures. Never raises — failure to record is logged only."""
     try:
         truncated = sample is not None and len(sample) > 4096
-        sample_bytes = (sample[:4096] if sample else None)
+        sample_bytes = sample[:4096] if sample else None
         pg.execute(
             """
             INSERT INTO ops.ingestion_failures
@@ -109,6 +109,7 @@ def _record_field_signature(
 # -----------------------------------------------------------------------------
 # Vehicle Positions
 # -----------------------------------------------------------------------------
+
 
 @asset(
     name="ttc_vehicle_positions",
@@ -190,6 +191,7 @@ def _bulk_insert_vehicle_positions(conn: psycopg.Connection, rows: list[dict[str
 # Trip Updates
 # -----------------------------------------------------------------------------
 
+
 @asset(
     name="ttc_trip_updates",
     group_name="ttc_realtime",
@@ -256,6 +258,7 @@ def _bulk_insert_trip_updates(conn: psycopg.Connection, rows: list[dict[str, Any
 # -----------------------------------------------------------------------------
 # Service Alerts (upsert pattern, not append)
 # -----------------------------------------------------------------------------
+
 
 @asset(
     name="ttc_service_alerts",

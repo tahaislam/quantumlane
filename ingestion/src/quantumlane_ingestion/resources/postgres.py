@@ -7,6 +7,7 @@ Why a pool, not a connection per asset:
     Establishing a new connection each time burns latency and pgbouncer-style
     connection counts. A small bounded pool keeps things predictable.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -59,13 +60,11 @@ class PostgresResource(ConfigurableResource):
             conn.commit()
 
     def fetch_one(self, sql: str, params: tuple = ()) -> tuple | None:
-        with self.connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, params)
-                return cur.fetchone()
+        with self.connection() as conn, conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchone()
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[tuple]:
-        with self.connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, params)
-                return cur.fetchall()
+        with self.connection() as conn, conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()

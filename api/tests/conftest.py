@@ -1,4 +1,5 @@
 """Shared API test fixtures."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -23,5 +24,6 @@ def api_client() -> Iterator[TestClient]:
     # Patch the db module's functions so lifespan doesn't try to connect.
     with patch("quantumlane_api.db.init_pool"), patch("quantumlane_api.db.close_pool"):
         from quantumlane_api.main import app
+
         with TestClient(app) as client:
             yield client

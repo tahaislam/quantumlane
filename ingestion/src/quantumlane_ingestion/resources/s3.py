@@ -12,6 +12,7 @@ Used for:
     - Daily parquet exports to the cold tier (daily_parquet_export)
     - (Future) Iceberg table data + raw snapshots as the lakehouse arc lands
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -33,7 +34,7 @@ class S3Resource(ConfigurableResource):
     bucket: str = ""
     region: str = "us-east-1"
 
-    _client: "S3Client | None" = PrivateAttr(default=None)
+    _client: S3Client | None = PrivateAttr(default=None)
 
     def setup_for_execution(self, context: InitResourceContext) -> None:
         # If credentials/bucket aren't configured (e.g. local dev without S3), defer
@@ -52,7 +53,7 @@ class S3Resource(ConfigurableResource):
             ),
         )
 
-    def _require_client(self) -> "S3Client":
+    def _require_client(self) -> S3Client:
         if self._client is None:
             raise RuntimeError(
                 "S3 client not configured. Set QL_S3_ACCESS_KEY_ID, "
@@ -64,7 +65,7 @@ class S3Resource(ConfigurableResource):
         """True if S3 is usable. Assets that should skip cleanly when S3 is absent call this."""
         return self._client is not None
 
-    def client(self) -> "S3Client":
+    def client(self) -> S3Client:
         """Return the underlying boto3 S3 client (for callers that need the raw client)."""
         return self._require_client()
 
@@ -73,7 +74,9 @@ class S3Resource(ConfigurableResource):
         client = self._require_client()
         client.upload_file(local_path, self.bucket, key)
 
-    def put_bytes(self, key: str, body: bytes, content_type: str = "application/octet-stream") -> None:
+    def put_bytes(
+        self, key: str, body: bytes, content_type: str = "application/octet-stream"
+    ) -> None:
         """Write an in-memory blob to S3. Retained from the R2 interface for small writes."""
         client = self._require_client()
         client.put_object(Bucket=self.bucket, Key=key, Body=body, ContentType=content_type)

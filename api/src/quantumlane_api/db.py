@@ -7,6 +7,7 @@ We use a sync psycopg pool rather than async because:
     - FastAPI handles concurrency at the request layer; queries run in the threadpool.
     - We can swap to async later if profiling shows the threadpool is the bottleneck.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -55,26 +56,23 @@ def connection() -> Iterator[psycopg.Connection]:
 
 
 def fetch_all(sql: str, params: tuple | dict = ()) -> list[dict]:
-    with connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            return cur.fetchall()
+    with connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        return cur.fetchall()
 
 
 def fetch_one(sql: str, params: tuple | dict = ()) -> dict | None:
-    with connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            return cur.fetchone()
+    with connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        return cur.fetchone()
 
 
 def ping() -> bool:
     """Returns True if a trivial query against the pool succeeds."""
     try:
-        with connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-                cur.fetchone()
+        with connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
         return True
     except Exception:
         return False
